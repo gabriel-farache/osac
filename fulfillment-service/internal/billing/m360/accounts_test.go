@@ -7,11 +7,11 @@ License. You may obtain a copy of the License at
   http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific
-language governing permissions and limitations under the License.
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
 */
 
-package billing
+package m360
 
 import (
 	"context"
@@ -23,23 +23,25 @@ import (
 	. "github.com/onsi/ginkgo/v2/dsl/core"
 	. "github.com/onsi/ginkgo/v2/dsl/table"
 	. "github.com/onsi/gomega"
+
+	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 )
 
 var _ = Describe("M360 accounts", func() {
 	var (
-		fake    *fakeM360
-		adapter Adapter
+		fake    *fakeServer
+		adapter billing.Adapter
 		queries chan url.Values
 	)
 
 	build := func(h http.HandlerFunc) {
 		queries = make(chan url.Values, 100)
-		fake = newFakeM360(func(w http.ResponseWriter, r *http.Request) {
+		fake = newFakeServer(func(w http.ResponseWriter, r *http.Request) {
 			queries <- r.URL.Query()
 			h(w, r)
 		})
 		var err error
-		adapter, err = NewM360(Config{BaseURL: fake.URL, APIVersion: "v2", Credential: testToken}).
+		adapter, err = New(billing.Config{BaseURL: fake.URL, APIVersion: "v2", Credential: testToken}).
 			SetLogger(logger).Build()
 		Expect(err).ToNot(HaveOccurred())
 	}
@@ -59,7 +61,7 @@ var _ = Describe("M360 accounts", func() {
 					{"Id":"a1","ExternalId":"ext-1","Status":"Active","ApprovalStatus":"Approved"},
 					{"Id":"a2","Status":"Weird","ApprovalStatus":"Pending"}],"NextPage":"p2"}`))
 			})
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{Size: 5, Token: "p1"})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Size: 5, Token: "p1"})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(page.Next).To(Equal("p2"))
 			Expect(page.Accounts).To(HaveLen(2))
@@ -76,7 +78,7 @@ var _ = Describe("M360 accounts", func() {
 		DescribeTable("clamps the page size to the provider maximum of 20",
 			func(requested int, sent int) {
 				build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Items":[]}`)) })
-				_, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{Size: requested})
+				_, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Size: requested})
 				Expect(err).ToNot(HaveOccurred())
 				Expect((<-queries).Get("pageSize")).To(Equal(strconv.Itoa(sent)))
 			},
@@ -88,7 +90,7 @@ var _ = Describe("M360 accounts", func() {
 
 		It("returns an empty page without error when the provider has no accounts", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Items":[]}`)) })
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(page.Accounts).To(BeEmpty())
 			Expect(page.Next).To(BeEmpty())
@@ -98,7 +100,7 @@ var _ = Describe("M360 accounts", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"Items":[{"Id":"a1","Status":"Active"},{"Id":"a1","Status":"Active"}]}`))
 			})
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(page.Accounts).To(HaveLen(2))
 		})
@@ -107,8 +109,8 @@ var _ = Describe("M360 accounts", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"Items":[{"Status":"Active"}]}`))
 			})
-			_, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{})
-			Expect(reasonOf(err)).To(Equal(ReasonMalformed))
+			_, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
 		})
 
 		It("searches with q and keeps only exact externalId matches", func() {
@@ -117,7 +119,7 @@ var _ = Describe("M360 accounts", func() {
 					{"Id":"a1","ExternalId":"ext-1","Name":"Acme"},
 					{"Id":"a2","ExternalId":"ext-10","Name":"Acme 2"}],"NextPage":"p2"}`))
 			})
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{ExternalID: "ext-1"}, Page{})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{ExternalID: "ext-1"}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect((<-queries).Get("q")).To(Equal("ext-1"))
 			Expect(page.Accounts).To(HaveLen(1))
@@ -132,12 +134,12 @@ var _ = Describe("M360 accounts", func() {
 					{"Id":"a2","ExternalId":"ext-2","Name":"Acme"},
 					{"Id":"a3","ExternalId":"ext-3","Name":"Acme Corp"}]}`))
 			})
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{Name: "Acme"}, Page{})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{Name: "Acme"}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect((<-queries).Get("q")).To(Equal("Acme"))
 			Expect(page.Accounts).To(HaveLen(2))
 
-			page, err = adapter.ListAccounts(context.Background(), AccountFilter{Name: "Acme", ExternalID: "ext-2"}, Page{})
+			page, err = adapter.ListAccounts(context.Background(), billing.AccountFilter{Name: "Acme", ExternalID: "ext-2"}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(page.Accounts).To(HaveLen(1))
 			Expect(page.Accounts[0].Ref.ID()).To(Equal("a2"))
@@ -145,8 +147,8 @@ var _ = Describe("M360 accounts", func() {
 
 		It("surfaces provider failure rather than an empty list", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })
-			page, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{})
-			Expect(reasonOf(err)).To(Equal(ReasonUnauthorized))
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
+			Expect(reasonOf(err)).To(Equal(billing.ReasonUnauthorized))
 			Expect(page.Accounts).To(BeNil())
 		})
 	})
@@ -158,32 +160,32 @@ var _ = Describe("M360 accounts", func() {
 				path = r.URL.EscapedPath()
 				_, _ = w.Write([]byte(`{"Id":"a/1","ExternalId":"ext-1","Status":"Inactive","ApprovalStatus":"Approved"}`))
 			})
-			acct, err := adapter.GetAccount(context.Background(), NewAccountRef("a/1"))
+			acct, err := adapter.GetAccount(context.Background(), billing.NewAccountRef("a/1"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(path).To(Equal("/api/v2/accounts/a%2F1"))
-			Expect(acct.State).To(Equal(AccountInactive))
+			Expect(acct.State).To(Equal(billing.AccountInactive))
 			Expect(acct.RawStatus).To(Equal("Inactive"))
 		})
 
 		It("tells a missing account (NOT_FOUND) apart from other failures", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) })
-			_, err := adapter.GetAccount(context.Background(), NewAccountRef("a1"))
-			Expect(reasonOf(err)).To(Equal(ReasonNotFound))
-			_, _, err = adapter.CorrelationValue(context.Background(), NewAccountRef("a1"))
-			Expect(reasonOf(err)).To(Equal(ReasonNotFound))
+			_, err := adapter.GetAccount(context.Background(), billing.NewAccountRef("a1"))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonNotFound))
+			_, _, err = adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonNotFound))
 		})
 
 		It("keeps a 404 on the account collection route as MALFORMED", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) })
-			_, err := adapter.ListAccounts(context.Background(), AccountFilter{}, Page{})
-			Expect(reasonOf(err)).To(Equal(ReasonMalformed))
+			_, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
 		})
 
 		It("reports the correlation value as present when ExternalId is set", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"Id":"a1","ExternalId":"ext-1","Status":"Active"}`))
 			})
-			v, ok, err := adapter.CorrelationValue(context.Background(), NewAccountRef("a1"))
+			v, ok, err := adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ok).To(BeTrue())
 			Expect(v).To(Equal("ext-1"))
@@ -191,7 +193,7 @@ var _ = Describe("M360 accounts", func() {
 
 		It("reports the correlation value as absent when ExternalId is missing", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Id":"a1","Status":"Active"}`)) })
-			v, ok, err := adapter.CorrelationValue(context.Background(), NewAccountRef("a1"))
+			v, ok, err := adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ok).To(BeFalse())
 			Expect(v).To(BeEmpty())
@@ -199,34 +201,34 @@ var _ = Describe("M360 accounts", func() {
 
 		It("propagates lookup failure from CorrelationValue", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(409) })
-			_, _, err := adapter.CorrelationValue(context.Background(), NewAccountRef("a1"))
-			Expect(reasonOf(err)).To(Equal(ReasonConflict))
+			_, _, err := adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonConflict))
 		})
 	})
 
 	DescribeTable("normalizes provider status to a closed state set",
-		func(raw string, want AccountState) {
+		func(raw string, want billing.AccountState) {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"Id":"a1","Status":"` + raw + `"}`))
 			})
-			acct, err := adapter.GetAccount(context.Background(), NewAccountRef("a1"))
+			acct, err := adapter.GetAccount(context.Background(), billing.NewAccountRef("a1"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(acct.State).To(Equal(want))
 			Expect(acct.RawStatus).To(Equal(raw))
 		},
-		Entry("Active", "Active", AccountActive),
-		Entry("case-insensitive", "ACTIVE", AccountActive),
-		Entry("Inactive", "Inactive", AccountInactive),
-		Entry("anything else", "Suspended", AccountUnknown),
-		Entry("empty", "", AccountUnknown),
+		Entry("Active", "Active", billing.AccountActive),
+		Entry("case-insensitive", "ACTIVE", billing.AccountActive),
+		Entry("Inactive", "Inactive", billing.AccountInactive),
+		Entry("anything else", "Suspended", billing.AccountUnknown),
+		Entry("empty", "", billing.AccountUnknown),
 	)
 
 	Describe("correlation write", func() {
 		It("is unsupported and never contacts the provider", func() {
 			build(func(http.ResponseWriter, *http.Request) {})
 			Expect(adapter.SupportsCorrelationWrite()).To(BeFalse())
-			err := adapter.SetCorrelationValue(context.Background(), NewAccountRef("a1"), "v")
-			Expect(reasonOf(err)).To(Equal(ReasonUnsupported))
+			err := adapter.SetCorrelationValue(context.Background(), billing.NewAccountRef("a1"), "v")
+			Expect(reasonOf(err)).To(Equal(billing.ReasonUnsupported))
 			Expect(fake.hits.Load()).To(BeZero())
 		})
 	})
@@ -240,7 +242,7 @@ var _ = Describe("M360 accounts", func() {
 
 		It("fails when the account API rejects the credential", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })
-			Expect(reasonOf(adapter.HealthCheck(context.Background()))).To(Equal(ReasonUnauthorized))
+			Expect(reasonOf(adapter.HealthCheck(context.Background()))).To(Equal(billing.ReasonUnauthorized))
 		})
 
 		It("gives up quickly on a hung provider", func() {
@@ -253,6 +255,6 @@ var _ = Describe("M360 accounts", func() {
 })
 
 var _ = It("M360 refuses to build without complete config", func() {
-	_, err := NewM360(Config{}).Build()
-	Expect(reasonOf(err)).To(Equal(ReasonNotConfigured))
+	_, err := New(billing.Config{}).Build()
+	Expect(reasonOf(err)).To(Equal(billing.ReasonNotConfigured))
 })

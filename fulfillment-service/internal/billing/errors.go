@@ -47,6 +47,16 @@ func (e *Error) Error() string {
 	return fmt.Sprintf("billing %s: %s", e.Op, e.Reason)
 }
 
+// NewError builds a classified failure that records the HTTP status which produced it. Provider adapters
+// construct their errors with it; callers branch on Reason.
+func NewError(reason Reason, op string, retryable bool, status int) *Error {
+	return &Error{Reason: reason, Op: op, Retryable: retryable, status: status}
+}
+
+// HTTPStatus reports the HTTP status that produced the error, 0 when none. Provider adapters use it to
+// reclassify failures; callers should branch on Reason instead.
+func (e *Error) HTTPStatus() int { return e.status }
+
 // ErrServiceNotFound reports that no provider service matched the requested name exactly.
 var ErrServiceNotFound = errors.New("billing service not found")
 

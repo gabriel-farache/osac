@@ -11,7 +11,7 @@ Unless required by applicable law or agreed to in writing, software distributed 
 language governing permissions and limitations under the License.
 */
 
-package billing
+package m360
 
 import (
 	"sync"
@@ -19,6 +19,7 @@ import (
 )
 
 // breaker opens after threshold consecutive failures and lets a single probe through once the cooldown elapses.
+// It is provider-agnostic: promote it to a shared package when a second billing provider needs one.
 type breaker struct {
 	mu        sync.Mutex
 	threshold int
