@@ -7,11 +7,11 @@ License. You may obtain a copy of the License at
   http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific
-language governing permissions and limitations under the License.
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
 */
 
-package billing
+package m360
 
 import (
 	"context"
@@ -26,18 +26,20 @@ import (
 	. "github.com/onsi/ginkgo/v2/dsl/core"
 	. "github.com/onsi/ginkgo/v2/dsl/table"
 	. "github.com/onsi/gomega"
+
+	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 )
 
 const testToken = "super-secret-token"
 
-type fakeM360 struct {
+type fakeServer struct {
 	*httptest.Server
 	hits    atomic.Int32
 	methods chan string
 }
 
-func newFakeM360(h http.HandlerFunc) *fakeM360 {
-	f := &fakeM360{methods: make(chan string, 1000)}
+func newFakeServer(h http.HandlerFunc) *fakeServer {
+	f := &fakeServer{methods: make(chan string, 1000)}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.hits.Add(1)
 		f.methods <- r.Method
@@ -46,21 +48,21 @@ func newFakeM360(h http.HandlerFunc) *fakeM360 {
 	return f
 }
 
-func testClient(url string) *m360Client {
-	c := newM360Client(Config{BaseURL: url, APIVersion: "v2", Credential: testToken}, logger)
+func testClient(url string) *client {
+	c := newClient(billing.Config{BaseURL: url, APIVersion: "v2", Credential: testToken}, logger)
 	c.backoffBase = time.Millisecond
 	c.backoffMax = 2 * time.Millisecond
 	return c
 }
 
-func reasonOf(err error) Reason {
-	var e *Error
+func reasonOf(err error) billing.Reason {
+	var e *billing.Error
 	ExpectWithOffset(1, errors.As(err, &e)).To(BeTrue(), "error was %v", err)
 	return e.Reason
 }
 
 var _ = Describe("M360 transport", func() {
-	var fake *fakeM360
+	var fake *fakeServer
 
 	AfterEach(func() {
 		fake.Close()
@@ -72,7 +74,7 @@ var _ = Describe("M360 transport", func() {
 
 	It("sends bearer token and addresses the configured API version", func() {
 		var auth, path string
-		fake = newFakeM360(func(w http.ResponseWriter, r *http.Request) {
+		fake = newFakeServer(func(w http.ResponseWriter, r *http.Request) {
 			auth, path = r.Header.Get("Authorization"), r.URL.Path
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		})
@@ -84,26 +86,26 @@ var _ = Describe("M360 transport", func() {
 	})
 
 	DescribeTable("classifies non-2xx responses",
-		func(status int, reason Reason, attempts int32) {
-			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })
+		func(status int, reason billing.Reason, attempts int32) {
+			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(status) })
 			err := testClient(fake.URL).get(context.Background(), "op", "/x", nil, nil)
 			Expect(reasonOf(err)).To(Equal(reason))
 			Expect(fake.hits.Load()).To(Equal(attempts))
 		},
-		Entry("401 not retried", 401, ReasonUnauthorized, int32(1)),
-		Entry("403 not retried", 403, ReasonUnauthorized, int32(1)),
-		Entry("409 not retried", 409, ReasonConflict, int32(1)),
-		Entry("400 not retried", 400, ReasonMalformed, int32(1)),
-		Entry("404 not retried", 404, ReasonMalformed, int32(1)),
-		Entry("500 retried to 4 attempts", 500, ReasonUnavailable, int32(4)),
-		Entry("503 retried to 4 attempts", 503, ReasonUnavailable, int32(4)),
-		Entry("429 retried to 4 attempts", 429, ReasonUnavailable, int32(4)),
-		Entry("408 retried to 4 attempts", 408, ReasonTimeout, int32(4)),
+		Entry("401 not retried", 401, billing.ReasonUnauthorized, int32(1)),
+		Entry("403 not retried", 403, billing.ReasonUnauthorized, int32(1)),
+		Entry("409 not retried", 409, billing.ReasonConflict, int32(1)),
+		Entry("400 not retried", 400, billing.ReasonMalformed, int32(1)),
+		Entry("404 not retried", 404, billing.ReasonMalformed, int32(1)),
+		Entry("500 retried to 4 attempts", 500, billing.ReasonUnavailable, int32(4)),
+		Entry("503 retried to 4 attempts", 503, billing.ReasonUnavailable, int32(4)),
+		Entry("429 retried to 4 attempts", 429, billing.ReasonUnavailable, int32(4)),
+		Entry("408 retried to 4 attempts", 408, billing.ReasonTimeout, int32(4)),
 	)
 
 	It("recovers when a retry succeeds", func() {
 		var n atomic.Int32
-		fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) {
+		fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) {
 			if n.Add(1) < 3 {
 				w.WriteHeader(502)
 				return
@@ -115,24 +117,24 @@ var _ = Describe("M360 transport", func() {
 	})
 
 	It("times out a slow attempt and retries it", func() {
-		fake = newFakeM360(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+		fake = newFakeServer(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
 		c := testClient(fake.URL)
 		c.attemptTimeout = 20 * time.Millisecond
 		err := c.get(context.Background(), "op", "/x", nil, nil)
-		Expect(reasonOf(err)).To(Equal(ReasonTimeout))
+		Expect(reasonOf(err)).To(Equal(billing.ReasonTimeout))
 		Expect(fake.hits.Load()).To(Equal(int32(4)))
 	})
 
 	It("reports network failure as UNAVAILABLE", func() {
-		fake = newFakeM360(func(http.ResponseWriter, *http.Request) {})
+		fake = newFakeServer(func(http.ResponseWriter, *http.Request) {})
 		c := testClient(fake.URL)
 		fake.CloseClientConnections()
 		fake.Close()
-		Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(ReasonUnavailable))
+		Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(billing.ReasonUnavailable))
 	})
 
 	It("stops retrying once the caller's context is done", func() {
-		fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) })
+		fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(500) })
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		Expect(testClient(fake.URL).get(ctx, "op", "/x", nil, nil)).To(HaveOccurred())
@@ -141,10 +143,10 @@ var _ = Describe("M360 transport", func() {
 
 	DescribeTable("treats bad 2xx bodies as MALFORMED, never as empty data",
 		func(body string) {
-			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
+			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
 			var out struct{ Items []string }
 			err := testClient(fake.URL).get(context.Background(), "op", "/x", nil, &out)
-			Expect(reasonOf(err)).To(Equal(ReasonMalformed))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
 			Expect(fake.hits.Load()).To(Equal(int32(1)))
 		},
 		Entry("not json", "<html>"),
@@ -157,7 +159,7 @@ var _ = Describe("M360 transport", func() {
 		It("opens after 5 consecutive exhausted failures, then probes and recovers", func() {
 			var fail atomic.Bool
 			fail.Store(true)
-			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) {
+			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) {
 				if fail.Load() {
 					w.WriteHeader(500)
 					return
@@ -168,11 +170,11 @@ var _ = Describe("M360 transport", func() {
 			c := testClient(fake.URL)
 			c.breaker.now = func() time.Time { return now }
 			for range 5 {
-				Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(ReasonUnavailable))
+				Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(billing.ReasonUnavailable))
 			}
 			before := fake.hits.Load()
 			err := c.get(context.Background(), "op", "/x", nil, nil)
-			Expect(reasonOf(err)).To(Equal(ReasonUnavailable))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonUnavailable))
 			Expect(fake.hits.Load()).To(Equal(before), "open breaker must not call the provider")
 
 			now = now.Add(31 * time.Second)
@@ -184,7 +186,7 @@ var _ = Describe("M360 transport", func() {
 		It("is neither tripped by nor blocking account discovery", func() {
 			var fail atomic.Bool
 			fail.Store(true)
-			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) {
+			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) {
 				if fail.Load() {
 					w.WriteHeader(500)
 					return
@@ -193,7 +195,7 @@ var _ = Describe("M360 transport", func() {
 			})
 			c := testClient(fake.URL)
 			for range 6 {
-				Expect(reasonOf(c.getDiscovery(context.Background(), "op", "/accounts", nil, nil))).To(Equal(ReasonUnavailable))
+				Expect(reasonOf(c.getDiscovery(context.Background(), "op", "/accounts", nil, nil))).To(Equal(billing.ReasonUnavailable))
 			}
 			fail.Store(false)
 			Expect(c.get(context.Background(), "op", "/services", nil, &struct{}{})).To(Succeed(), "pricing breaker must still be closed")
@@ -203,15 +205,15 @@ var _ = Describe("M360 transport", func() {
 				Expect(c.get(context.Background(), "op", "/services", nil, nil)).To(HaveOccurred())
 			}
 			fail.Store(false)
-			Expect(reasonOf(c.get(context.Background(), "op", "/services", nil, nil))).To(Equal(ReasonUnavailable))
+			Expect(reasonOf(c.get(context.Background(), "op", "/services", nil, nil))).To(Equal(billing.ReasonUnavailable))
 			Expect(c.getDiscovery(context.Background(), "op", "/accounts", nil, &struct{}{})).To(Succeed(), "open pricing breaker must not block accounts")
 		})
 
 		It("is not tripped by non-retryable client errors", func() {
-			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })
+			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })
 			c := testClient(fake.URL)
 			for range 10 {
-				Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(ReasonUnauthorized))
+				Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(billing.ReasonUnauthorized))
 			}
 			Expect(fake.hits.Load()).To(Equal(int32(10)))
 		})
@@ -221,7 +223,7 @@ var _ = Describe("M360 transport", func() {
 var _ = Describe("M360 redaction", func() {
 	It("keeps bodies, tokens and ids out of errors and logs", func() {
 		const leak = "acct-native-9999"
-		fake := newFakeM360(func(w http.ResponseWriter, _ *http.Request) {
+		fake := newFakeServer(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(500)
 			_, _ = w.Write([]byte(`{"error":{"code":"E","message":"` + leak + ` ` + testToken + `"}}`))
 		})

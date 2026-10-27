@@ -7,16 +7,18 @@ License. You may obtain a copy of the License at
   http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
-"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific
-language governing permissions and limitations under the License.
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
 */
 
-package billing
+package billing_test
 
 import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 )
 
 // fakeAdapter is a second provider whose native model differs from M360 and which supports correlation writes.
@@ -32,45 +34,45 @@ type fakeNativeAccount struct {
 	uuid, state, approval, tag string
 }
 
-var _ Adapter = (*fakeAdapter)(nil)
+var _ billing.Adapter = (*fakeAdapter)(nil)
 
-func (f *fakeAdapter) ListAccounts(_ context.Context, _ AccountFilter, _ Page) (AccountPage, error) {
+func (f *fakeAdapter) ListAccounts(_ context.Context, _ billing.AccountFilter, _ billing.Page) (billing.AccountPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	page := AccountPage{Accounts: []Account{}}
+	page := billing.AccountPage{Accounts: []billing.Account{}}
 	for _, id := range f.order {
 		page.Accounts = append(page.Accounts, f.toAccount(f.accounts[id]))
 	}
 	return page, nil
 }
 
-func (f *fakeAdapter) GetAccount(_ context.Context, ref AccountRef) (Account, error) {
+func (f *fakeAdapter) GetAccount(_ context.Context, ref billing.AccountRef) (billing.Account, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.accounts[ref.ID()]
 	if !ok {
-		return Account{}, &Error{Reason: ReasonMalformed, Op: "GetAccount"}
+		return billing.Account{}, &billing.Error{Reason: billing.ReasonMalformed, Op: "GetAccount"}
 	}
 	return f.toAccount(a), nil
 }
 
-func (f *fakeAdapter) toAccount(a *fakeNativeAccount) Account {
-	state := AccountUnknown
+func (f *fakeAdapter) toAccount(a *fakeNativeAccount) billing.Account {
+	state := billing.AccountUnknown
 	switch strings.ToLower(a.state) {
 	case "enabled":
-		state = AccountActive
+		state = billing.AccountActive
 	case "disabled":
-		state = AccountInactive
+		state = billing.AccountInactive
 	}
-	return Account{Ref: NewAccountRef(a.uuid), ExternalID: a.tag, State: state, RawStatus: a.state, ApprovalStatus: a.approval}
+	return billing.Account{Ref: billing.NewAccountRef(a.uuid), ExternalID: a.tag, State: state, RawStatus: a.state, ApprovalStatus: a.approval}
 }
 
-func (f *fakeAdapter) CorrelationValue(ctx context.Context, ref AccountRef) (string, bool, error) {
+func (f *fakeAdapter) CorrelationValue(ctx context.Context, ref billing.AccountRef) (string, bool, error) {
 	a, err := f.GetAccount(ctx, ref)
 	return a.ExternalID, a.ExternalID != "", err
 }
 
-func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (ServiceRef, error) {
+func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (billing.ServiceRef, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var found []string
@@ -81,37 +83,37 @@ func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (Service
 	}
 	switch len(found) {
 	case 0:
-		return ServiceRef{}, ErrServiceNotFound
+		return billing.ServiceRef{}, billing.ErrServiceNotFound
 	case 1:
-		return NewServiceRef(found[0]), nil
+		return billing.NewServiceRef(found[0]), nil
 	}
-	return ServiceRef{}, &Error{Reason: ReasonAmbiguous, Op: "FindServiceByName"}
+	return billing.ServiceRef{}, &billing.Error{Reason: billing.ReasonAmbiguous, Op: "FindServiceByName"}
 }
 
-func (f *fakeAdapter) ListPriceableAttributes(context.Context, ServiceRef) ([]PriceableAttribute, error) {
-	return []PriceableAttribute{{Name: "gpu_hours"}}, nil
+func (f *fakeAdapter) ListPriceableAttributes(context.Context, billing.ServiceRef) ([]billing.PriceableAttribute, error) {
+	return []billing.PriceableAttribute{{Name: "gpu_hours"}}, nil
 }
 
-func (f *fakeAdapter) GetServiceRateCard(_ context.Context, svc ServiceRef, currency string) (RateCard, error) {
+func (f *fakeAdapter) GetServiceRateCard(_ context.Context, svc billing.ServiceRef, currency string) (billing.RateCard, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	amount, ok := f.rates[svc.ID()][currency]
 	if !ok {
-		return RateCard{}, ErrRateCardNotFound
+		return billing.RateCard{}, billing.ErrRateCardNotFound
 	}
-	return RateCard{Currency: currency, Rows: []RateRow{{Dimension: "gpu_hours", Amount: amount}}}, nil
+	return billing.RateCard{Currency: currency, Rows: []billing.RateRow{{Dimension: "gpu_hours", Amount: amount}}}, nil
 }
 
 func (f *fakeAdapter) HealthCheck(context.Context) error { return nil }
 
 func (f *fakeAdapter) SupportsCorrelationWrite() bool { return true }
 
-func (f *fakeAdapter) SetCorrelationValue(_ context.Context, ref AccountRef, value string) error {
+func (f *fakeAdapter) SetCorrelationValue(_ context.Context, ref billing.AccountRef, value string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	a, ok := f.accounts[ref.ID()]
 	if !ok {
-		return &Error{Reason: ReasonMalformed, Op: "SetCorrelationValue"}
+		return &billing.Error{Reason: billing.ReasonMalformed, Op: "SetCorrelationValue"}
 	}
 	a.tag = value
 	return nil

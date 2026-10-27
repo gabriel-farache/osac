@@ -22,7 +22,8 @@ type Config struct {
 	Credential string
 }
 
-func (c Config) validate() error {
+// Validate fails with a NOT_CONFIGURED *Error when the configuration is incomplete.
+func (c Config) Validate() error {
 	if c.BaseURL == "" || c.APIVersion == "" || c.Credential == "" {
 		return &Error{Reason: ReasonNotConfigured, Op: "configure"}
 	}
