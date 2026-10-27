@@ -127,7 +127,7 @@ var _ = Describe("M360 transport", func() {
 		fake = newFakeM360(func(http.ResponseWriter, *http.Request) {})
 		c := testClient(fake.URL)
 		fake.CloseClientConnections()
-		fake.Server.Close()
+		fake.Close()
 		Expect(reasonOf(c.get(context.Background(), "op", "/x", nil, nil))).To(Equal(ReasonUnavailable))
 	})
 
