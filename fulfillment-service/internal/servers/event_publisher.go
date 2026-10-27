@@ -1073,6 +1073,10 @@ func (p *EventPublisher) redactEvent(event *privatev1.Event) {
 		if spec != nil {
 			spec.ClearCredentials()
 		}
+	case event.HasBillingAccount():
+		account := event.GetBillingAccount()
+		account.SetProviderAccountReference("")
+		account.ClearCorrelationId()
 	case event.HasTenant():
 		status := event.GetTenant().GetStatus()
 		if status != nil {

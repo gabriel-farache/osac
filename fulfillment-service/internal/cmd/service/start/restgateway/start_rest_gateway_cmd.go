@@ -324,6 +324,7 @@ func buildHandlerList() []handlerRegistrar {
 		publicv1.RegisterRoleBindingsHandler,
 		publicv1.RegisterJsonWebKeySetHandler,
 		publicv1.RegisterStorageTiersHandler,
+		publicv1.RegisterBillingAccountsHandler,
 		publicv1.RegisterVolumesHandler,
 		publicv1.RegisterSelfSubjectAccessReviewsHandler,
 		// Shared private API:
@@ -335,6 +336,7 @@ func buildHandlerList() []handlerRegistrar {
 		privatev1.RegisterSecretsHandler,
 		privatev1.RegisterStorageBackendsHandler,
 		privatev1.RegisterStorageTiersHandler,
+		privatev1.RegisterBillingAccountsHandler,
 		privatev1.RegisterVirtualNetworksHandler,
 		privatev1.RegisterSubnetsHandler,
 		privatev1.RegisterSecurityGroupsHandler,

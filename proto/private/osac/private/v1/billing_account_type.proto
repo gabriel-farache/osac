@@ -1,0 +1,73 @@
+//
+// Copyright (c) 2026 Red Hat, Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+// the License. You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+// an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+// specific language governing permissions and limitations under the License.
+//
+
+syntax = "proto3";
+
+package osac.private.v1;
+
+import "cleanapi/cleanapi.proto";
+import "google/protobuf/timestamp.proto";
+import "osac/private/v1/metadata_type.proto";
+
+option (cleanapi.file).package = "osac.public.v1";
+
+// Last normalized state of a billing account, as observed from the billing provider.
+enum BillingAccountState {
+  // The state is unset. It is never reported for a discovered account.
+  BILLING_ACCOUNT_STATE_UNSPECIFIED = 0;
+
+  // The provider reports the account as active.
+  BILLING_ACCOUNT_STATE_ACTIVE = 1;
+
+  // The provider reports the account as inactive.
+  BILLING_ACCOUNT_STATE_INACTIVE = 2;
+
+  // OSAC could not classify the provider state: it is missing, unmapped, ambiguous, or the account is no longer
+  // listed by the provider.
+  BILLING_ACCOUNT_STATE_UNKNOWN = 3;
+}
+
+// An account discovered from the configured billing provider.
+//
+// Billing accounts are provider-global: they carry no tenant. This is a flat read model, so it deliberately does not
+// follow the id/metadata/spec/status object shape; accounts are never created or updated through the API.
+message BillingAccount {
+  // OSAC identifier of the account. It is not the identifier of the account in the billing provider.
+  string id = 1;
+
+  // Storage metadata required by the generic persistence layer.
+  Metadata metadata = 2 [(cleanapi.field).private = true];
+
+  // Identifies the billing adapter that discovered the account, for example `m360`.
+  string provider_key = 3;
+
+  // Identifier of the account in the billing provider, used for backend calls.
+  string provider_account_reference = 4 [(cleanapi.field).private = true];
+
+  // Label of the account supplied by the provider.
+  string display_name = 5;
+
+  // ISO-4217 code of the currency used to interpret prices. It is empty when the provider does not supply one.
+  string base_currency = 6;
+
+  // Last normalized state of the account.
+  BillingAccountState state = 7;
+
+  // Time at which the state of the account was last read from the provider.
+  google.protobuf.Timestamp status_observed_at = 8;
+
+  // Attribution identifier carried on usage events. It is unset until it is established, either by copying the value
+  // the provider holds or at tenant assignment time. It is not the tenant identifier nor the provider account
+  // identifier.
+  optional string correlation_id = 9;
+}

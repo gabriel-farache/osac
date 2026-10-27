@@ -21,6 +21,7 @@ import "osac/private/v1/add_on_operator_type.proto";
 import "osac/private/v1/baremetal_instance_catalog_item_type.proto";
 import "osac/private/v1/baremetal_instance_template_type.proto";
 import "osac/private/v1/baremetal_instance_type.proto";
+import "osac/private/v1/billing_account_type.proto";
 import "osac/private/v1/cluster_catalog_item_type.proto";
 import "osac/private/v1/cluster_template_type.proto";
 import "osac/private/v1/cluster_version_type.proto";
@@ -105,6 +106,7 @@ message Event {
     Volume volume = 35 [(cleanapi.field).private = true];
     AddOnOperator add_on_operator = 37 [(cleanapi.field).private = true];
     FabricDomain fabric_domain = 38 [(cleanapi.field).private = true];
+    BillingAccount billing_account = 39 [(cleanapi.field).private = true];
   }
 
   reserved 10;

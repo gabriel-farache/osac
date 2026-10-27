@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/auth"
+	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 	"github.com/osac-project/osac/fulfillment-service/internal/database/dao"
 	"github.com/osac-project/osac/fulfillment-service/internal/servers"
 	"github.com/osac-project/osac/fulfillment-service/internal/services"
@@ -47,6 +48,11 @@ type ResourceServerDeps struct {
 	// before the gRPC server's interceptor chain is built, which happens before RegisterResourceServers is
 	// called. It's threaded through here so registration still happens in one place.
 	PrivateUsersServer privatev1.UsersServer
+
+	// BillingAdapter is the adapter of the configured billing provider and BillingProviderKey the key stored on the
+	// accounts it discovers. Both are optional: without an adapter billing is disabled.
+	BillingAdapter     billing.Adapter
+	BillingProviderKey string
 
 	Services *services.Flags
 }
@@ -671,6 +677,36 @@ func RegisterResourceServers(ctx context.Context, registrar grpc.ServiceRegistra
 		return nil, fmt.Errorf("failed to create storage tiers server: %w", err)
 	}
 	publicv1.RegisterStorageTiersServer(registrar, storageTiersServer)
+
+	// Create the private billing accounts server:
+	deps.Logger.InfoContext(ctx, "Creating private billing accounts server")
+	privateBillingAccountsServer, err := servers.NewPrivateBillingAccountsServer().
+		SetLogger(deps.Logger).
+		SetAttributionLogic(deps.PrivateAttributionLogic).
+		SetTenancyLogic(deps.TenancyLogic).
+		SetMetricsRegisterer(deps.MetricsRegisterer).
+		SetBillingAdapter(deps.BillingAdapter).
+		SetProviderKey(deps.BillingProviderKey).
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create private billing accounts server: %w", err)
+	}
+	privatev1.RegisterBillingAccountsServer(registrar, privateBillingAccountsServer)
+
+	// Create the billing accounts server:
+	deps.Logger.InfoContext(ctx, "Creating billing accounts server")
+	billingAccountsServer, err := servers.NewBillingAccountsServer().
+		SetLogger(deps.Logger).
+		SetAttributionLogic(deps.PublicAttributionLogic).
+		SetTenancyLogic(deps.TenancyLogic).
+		SetMetricsRegisterer(deps.MetricsRegisterer).
+		SetBillingAdapter(deps.BillingAdapter).
+		SetProviderKey(deps.BillingProviderKey).
+		Build()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create billing accounts server: %w", err)
+	}
+	publicv1.RegisterBillingAccountsServer(registrar, billingAccountsServer)
 
 	// Create the roles server:
 	deps.Logger.InfoContext(ctx, "Creating roles server")
