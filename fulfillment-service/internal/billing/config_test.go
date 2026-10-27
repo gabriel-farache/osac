@@ -102,6 +102,10 @@ var _ = Describe("LoadConfig", func() {
 			_, err := billing.LoadConfig(getenv, readFile)
 			Expect(err).To(HaveOccurred())
 			Expect(reasonOf(err)).To(Equal(billing.ReasonUnavailable))
+			// The credential is a mounted Secret read once at startup: retrying cannot fix it.
+			var be *billing.Error
+			Expect(errors.As(err, &be)).To(BeTrue())
+			Expect(be.Retryable).To(BeFalse())
 		},
 		Entry("unreadable", nil),
 		Entry("empty", ptr("")),

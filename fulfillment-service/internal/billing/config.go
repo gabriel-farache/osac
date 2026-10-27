@@ -50,7 +50,7 @@ func LoadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 	raw, err := readFile(file)
 	cred := strings.TrimRight(string(raw), "\r\n")
 	if err != nil || cred == "" {
-		return Config{}, &Error{Reason: ReasonUnavailable, Op: op, Retryable: true}
+		return Config{}, &Error{Reason: ReasonUnavailable, Op: op}
 	}
 	cfg.Credential = cred
 	return cfg, nil
