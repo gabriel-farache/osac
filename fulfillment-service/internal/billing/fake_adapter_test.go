@@ -1,0 +1,118 @@
+/*
+Copyright (c) 2026 Red Hat Inc.
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the
+License. You may obtain a copy of the License at
+
+  http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific
+language governing permissions and limitations under the License.
+*/
+
+package billing
+
+import (
+	"context"
+	"strings"
+	"sync"
+)
+
+// fakeAdapter is a second provider whose native model differs from M360 and which supports correlation writes.
+type fakeAdapter struct {
+	mu       sync.Mutex
+	accounts map[string]*fakeNativeAccount
+	order    []string
+	services map[string]string            // native uuid -> display name
+	rates    map[string]map[string]string // service uuid -> currency -> amount
+}
+
+type fakeNativeAccount struct {
+	uuid, state, approval, tag string
+}
+
+var _ Adapter = (*fakeAdapter)(nil)
+
+func (f *fakeAdapter) ListAccounts(_ context.Context, _ Page) (AccountPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	page := AccountPage{Accounts: []Account{}}
+	for _, id := range f.order {
+		page.Accounts = append(page.Accounts, f.toAccount(f.accounts[id]))
+	}
+	return page, nil
+}
+
+func (f *fakeAdapter) GetAccount(_ context.Context, ref AccountRef) (Account, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.accounts[ref.ID()]
+	if !ok {
+		return Account{}, &Error{Reason: ReasonMalformed, Op: "GetAccount"}
+	}
+	return f.toAccount(a), nil
+}
+
+func (f *fakeAdapter) toAccount(a *fakeNativeAccount) Account {
+	state := AccountUnknown
+	switch strings.ToLower(a.state) {
+	case "enabled":
+		state = AccountActive
+	case "disabled":
+		state = AccountInactive
+	}
+	return Account{Ref: NewAccountRef(a.uuid), ExternalID: a.tag, State: state, RawStatus: a.state, ApprovalStatus: a.approval}
+}
+
+func (f *fakeAdapter) CorrelationValue(ctx context.Context, ref AccountRef) (string, bool, error) {
+	a, err := f.GetAccount(ctx, ref)
+	return a.ExternalID, a.ExternalID != "", err
+}
+
+func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (ServiceRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var found []string
+	for id, n := range f.services {
+		if n == name {
+			found = append(found, id)
+		}
+	}
+	switch len(found) {
+	case 0:
+		return ServiceRef{}, ErrServiceNotFound
+	case 1:
+		return NewServiceRef(found[0]), nil
+	}
+	return ServiceRef{}, &Error{Reason: ReasonAmbiguous, Op: "FindServiceByName"}
+}
+
+func (f *fakeAdapter) ListPriceableAttributes(context.Context, ServiceRef) ([]PriceableAttribute, error) {
+	return []PriceableAttribute{{Name: "gpu_hours"}}, nil
+}
+
+func (f *fakeAdapter) GetServiceRateCard(_ context.Context, svc ServiceRef, currency string) (RateCard, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	amount, ok := f.rates[svc.ID()][currency]
+	if !ok {
+		return RateCard{}, ErrRateCardNotFound
+	}
+	return RateCard{Currency: currency, Rows: []RateRow{{Dimension: "gpu_hours", Amount: amount}}}, nil
+}
+
+func (f *fakeAdapter) HealthCheck(context.Context) error { return nil }
+
+func (f *fakeAdapter) SupportsCorrelationWrite() bool { return true }
+
+func (f *fakeAdapter) SetCorrelationValue(_ context.Context, ref AccountRef, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a, ok := f.accounts[ref.ID()]
+	if !ok {
+		return &Error{Reason: ReasonMalformed, Op: "SetCorrelationValue"}
+	}
+	a.tag = value
+	return nil
+}
