@@ -53,6 +53,11 @@ type Account struct {
 	ApprovalStatus string
 }
 
+// ExternalID is the provider correlation value and must never reach logs or formatted output.
+func (Account) String() string       { return redacted }
+func (Account) GoString() string     { return redacted }
+func (Account) LogValue() slog.Value { return slog.StringValue(redacted) }
+
 type Page struct {
 	Token string
 	Size  int

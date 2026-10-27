@@ -93,6 +93,34 @@ var _ = Describe("M360 services", func() {
 			Expect(err).To(MatchError(ErrServiceNotFound))
 		})
 
+		It("gives up as malformed when the provider cycles page tokens", func() {
+			var n int
+			build(func(w http.ResponseWriter, r *http.Request) {
+				n++
+				tok := "A"
+				if n%2 == 0 {
+					tok = "B"
+				}
+				_, _ = w.Write([]byte(`{"Items":[],"NextPage":"` + tok + `"}`))
+			})
+			_, err := adapter.FindServiceByName(context.Background(), "GPU Hours")
+			Expect(reasonOf(err)).To(Equal(ReasonMalformed))
+		})
+
+		It("tolerates a trailing slash on the configured base URL", func() {
+			var path string
+			build(func(w http.ResponseWriter, r *http.Request) {
+				path = r.URL.Path
+				servicesBody("GPU Hours")(w, r)
+			})
+			a, err := NewM360(Config{BaseURL: fake.URL + "/", APIVersion: "v2", Credential: testToken}).
+				SetLogger(logger).Build()
+			Expect(err).ToNot(HaveOccurred())
+			_, err = a.FindServiceByName(context.Background(), "GPU Hours")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(path).To(Equal("/api/v2/services"))
+		})
+
 		It("reports ambiguity when two services match exactly", func() {
 			build(servicesBody("GPU Hours", "GPU Hours"))
 			_, err := adapter.FindServiceByName(context.Background(), "GPU Hours")

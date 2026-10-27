@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -89,7 +90,7 @@ func (c *m360Client) attempt(ctx context.Context, op, path string, query url.Val
 	ctx, cancel := context.WithTimeout(ctx, c.attemptTimeout)
 	defer cancel()
 
-	u := c.cfg.BaseURL + "/api/" + c.cfg.APIVersion + path
+	u := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/api/" + c.cfg.APIVersion + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}

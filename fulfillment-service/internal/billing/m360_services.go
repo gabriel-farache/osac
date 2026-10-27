@@ -49,11 +49,17 @@ type m360RateCard struct {
 	} `json:"Rows"`
 }
 
+// maxServicePages bounds pagination so a provider that cycles page tokens cannot loop forever.
+const maxServicePages = 50
+
 func (m *m360) FindServiceByName(ctx context.Context, name string) (ServiceRef, error) {
 	const op = "FindServiceByName"
 	var matches []m360Service
 	token := ""
-	for {
+	for page := 0; ; page++ {
+		if page >= maxServicePages {
+			return ServiceRef{}, &Error{Reason: ReasonMalformed, Op: op}
+		}
 		query := url.Values{"q": {name}, "pageSize": {strconv.Itoa(maxPageSize)}}
 		if token != "" {
 			query.Set("page", token)
