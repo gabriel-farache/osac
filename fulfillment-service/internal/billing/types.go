@@ -47,6 +47,7 @@ const (
 // Account keeps the raw provider status values next to the normalized state.
 type Account struct {
 	Ref            AccountRef
+	Name           string
 	ExternalID     string
 	State          AccountState
 	RawStatus      string
@@ -57,6 +58,13 @@ type Account struct {
 func (Account) String() string       { return redacted }
 func (Account) GoString() string     { return redacted }
 func (Account) LogValue() slog.Value { return slog.StringValue(redacted) }
+
+// AccountFilter narrows ListAccounts to exact matches; zero fields are ignored. When both are set an account must
+// match both.
+type AccountFilter struct {
+	ExternalID string
+	Name       string
+}
 
 type Page struct {
 	Token string

@@ -95,7 +95,7 @@ func (m *m360) ListPriceableAttributes(ctx context.Context, svc ServiceRef) ([]P
 	const op = "ListPriceableAttributes"
 	var list m360AttributeList
 	if err := m.client.get(ctx, op, "/services/"+url.PathEscape(svc.ID())+"/priceable-attributes", nil, &list); err != nil {
-		return nil, err
+		return nil, notFoundOn404(err)
 	}
 	attrs := make([]PriceableAttribute, 0, len(list.Items))
 	for _, item := range list.Items {

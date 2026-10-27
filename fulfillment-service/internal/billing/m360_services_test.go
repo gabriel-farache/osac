@@ -148,6 +148,12 @@ var _ = Describe("M360 services", func() {
 	})
 
 	Describe("ListPriceableAttributes", func() {
+		It("reports NOT_FOUND when the service does not exist", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(404) })
+			_, err := adapter.ListPriceableAttributes(context.Background(), NewServiceRef("s"))
+			Expect(reasonOf(err)).To(Equal(ReasonNotFound))
+		})
+
 		It("returns the attribute names", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"Items":[{"Name":"gpu_hours"},{"Name":"storage_gb"}]}`))

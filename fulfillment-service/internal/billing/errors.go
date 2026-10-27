@@ -30,6 +30,7 @@ const (
 	ReasonConflict      Reason = "CONFLICT"
 	ReasonUnsupported   Reason = "UNSUPPORTED"
 	ReasonAmbiguous     Reason = "AMBIGUOUS"
+	ReasonNotFound      Reason = "NOT_FOUND" // a specific provider resource addressed by id does not exist
 )
 
 // Error is a classified adapter failure. It deliberately carries no provider body or native identifier.

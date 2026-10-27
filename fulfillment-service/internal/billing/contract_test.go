@@ -96,7 +96,7 @@ var _ = Describe("Adapter contract", func() {
 			})
 
 			It("lists accounts in the normalized shape", func() {
-				page, err := adapter.ListAccounts(ctx, Page{})
+				page, err := adapter.ListAccounts(ctx, AccountFilter{}, Page{})
 				Expect(err).ToNot(HaveOccurred())
 				Expect(page.Accounts).To(HaveLen(1))
 				a := page.Accounts[0]

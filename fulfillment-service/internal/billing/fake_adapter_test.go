@@ -34,7 +34,7 @@ type fakeNativeAccount struct {
 
 var _ Adapter = (*fakeAdapter)(nil)
 
-func (f *fakeAdapter) ListAccounts(_ context.Context, _ Page) (AccountPage, error) {
+func (f *fakeAdapter) ListAccounts(_ context.Context, _ AccountFilter, _ Page) (AccountPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	page := AccountPage{Accounts: []Account{}}
