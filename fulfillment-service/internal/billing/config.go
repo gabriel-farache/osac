@@ -13,8 +13,10 @@ language governing permissions and limitations under the License.
 
 package billing
 
-// Config is supplied by the caller; this package reads no flags, environment or files. Embedding opaque keeps the
-// credential out of logs and formatted output.
+import "strings"
+
+// Config is the provider connection settings, built by LoadConfig or supplied directly by the caller. Embedding
+// opaque keeps the credential out of logs and formatted output.
 type Config struct {
 	opaque
 	BaseURL    string
@@ -28,4 +30,28 @@ func (c Config) Validate() error {
 		return &Error{Reason: ReasonNotConfigured, Op: "configure"}
 	}
 	return nil
+}
+
+// LoadConfig builds a Config from the deployment: OSAC_BILLING_PROVIDER, OSAC_BILLING_BASE_URL,
+// OSAC_BILLING_API_VERSION and OSAC_BILLING_CREDENTIAL_FILE (a mounted Secret file). An unset provider means
+// billing is off and yields a zero Config with no error. Incomplete settings fail with NOT_CONFIGURED and an
+// unreadable or empty credential file with UNAVAILABLE; errors never carry the credential, path or URL.
+func LoadConfig(getenv func(string) string, readFile func(string) ([]byte, error)) (Config, error) {
+	const op = "load config"
+	provider := getenv("OSAC_BILLING_PROVIDER")
+	if provider == "" {
+		return Config{}, nil
+	}
+	file := getenv("OSAC_BILLING_CREDENTIAL_FILE")
+	cfg := Config{BaseURL: getenv("OSAC_BILLING_BASE_URL"), APIVersion: getenv("OSAC_BILLING_API_VERSION")}
+	if provider != "m360" || cfg.BaseURL == "" || cfg.APIVersion == "" || file == "" {
+		return Config{}, &Error{Reason: ReasonNotConfigured, Op: op}
+	}
+	raw, err := readFile(file)
+	cred := strings.TrimRight(string(raw), "\r\n")
+	if err != nil || cred == "" {
+		return Config{}, &Error{Reason: ReasonUnavailable, Op: op, Retryable: true}
+	}
+	cfg.Credential = cred
+	return cfg, nil
 }
