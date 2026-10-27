@@ -80,7 +80,7 @@ func (m *m360) ListAccounts(ctx context.Context, filter AccountFilter, page Page
 		query.Set("q", filter.Name)
 	}
 	var list m360AccountList
-	if err := m.client.get(ctx, op, "/accounts", query, &list); err != nil {
+	if err := m.client.getDiscovery(ctx, op, "/accounts", query, &list); err != nil {
 		return AccountPage{}, err
 	}
 	result := AccountPage{Accounts: make([]Account, 0, len(list.Items)), Next: list.NextPage}
@@ -100,7 +100,7 @@ func (m *m360) ListAccounts(ctx context.Context, filter AccountFilter, page Page
 func (m *m360) GetAccount(ctx context.Context, ref AccountRef) (Account, error) {
 	const op = "GetAccount"
 	var raw m360Account
-	if err := m.client.get(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &raw); err != nil {
+	if err := m.client.getDiscovery(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &raw); err != nil {
 		return Account{}, notFoundOn404(err)
 	}
 	return raw.normalize(op)
@@ -125,5 +125,5 @@ func (m *m360) HealthCheck(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
 	query := url.Values{"pageSize": {"1"}}
-	return m.client.get(ctx, "HealthCheck", "/accounts", query, nil)
+	return m.client.getDiscovery(ctx, "HealthCheck", "/accounts", query, nil)
 }

@@ -181,6 +181,32 @@ var _ = Describe("M360 transport", func() {
 			Expect(c.get(context.Background(), "op", "/x", nil, &struct{}{})).To(Succeed())
 		})
 
+		It("is neither tripped by nor blocking account discovery", func() {
+			var fail atomic.Bool
+			fail.Store(true)
+			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) {
+				if fail.Load() {
+					w.WriteHeader(500)
+					return
+				}
+				_, _ = w.Write([]byte(`{}`))
+			})
+			c := testClient(fake.URL)
+			for range 6 {
+				Expect(reasonOf(c.getDiscovery(context.Background(), "op", "/accounts", nil, nil))).To(Equal(ReasonUnavailable))
+			}
+			fail.Store(false)
+			Expect(c.get(context.Background(), "op", "/services", nil, &struct{}{})).To(Succeed(), "pricing breaker must still be closed")
+
+			fail.Store(true)
+			for range 5 {
+				Expect(c.get(context.Background(), "op", "/services", nil, nil)).To(HaveOccurred())
+			}
+			fail.Store(false)
+			Expect(reasonOf(c.get(context.Background(), "op", "/services", nil, nil))).To(Equal(ReasonUnavailable))
+			Expect(c.getDiscovery(context.Background(), "op", "/accounts", nil, &struct{}{})).To(Succeed(), "open pricing breaker must not block accounts")
+		})
+
 		It("is not tripped by non-retryable client errors", func() {
 			fake = newFakeM360(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(401) })
 			c := testClient(fake.URL)

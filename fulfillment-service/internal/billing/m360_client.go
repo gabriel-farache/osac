@@ -38,7 +38,7 @@ type m360Client struct {
 	cfg            Config
 	http           *http.Client
 	logger         *slog.Logger
-	breaker        *breaker
+	breaker        *breaker // pricing/coverage only; see get and getDiscovery
 	attemptTimeout time.Duration
 	backoffBase    time.Duration
 	backoffMax     time.Duration
@@ -56,33 +56,44 @@ func newM360Client(cfg Config, logger *slog.Logger) *m360Client {
 	}
 }
 
-// get decodes a 2xx JSON response into out (which may be nil to ignore the body).
+// get is for pricing and coverage reads (services, attributes, rate cards): it goes through the pricing breaker.
+// It decodes a 2xx JSON response into out (which may be nil to ignore the body).
 func (c *m360Client) get(ctx context.Context, op, path string, query url.Values, out any) error {
-	if !c.breaker.allow() {
+	return c.do(ctx, c.breaker, op, path, query, out)
+}
+
+// getDiscovery is for account reads and the health check. Story 7.01 keeps account discovery out of the pricing
+// breaker, so these calls neither trip it nor are blocked by it.
+func (c *m360Client) getDiscovery(ctx context.Context, op, path string, query url.Values, out any) error {
+	return c.do(ctx, nil, op, path, query, out)
+}
+
+func (c *m360Client) do(ctx context.Context, b *breaker, op, path string, query url.Values, out any) error {
+	if !b.allow() {
 		return &Error{Reason: ReasonUnavailable, Op: op, Retryable: true}
 	}
 	var err *Error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
 		if attempt > 0 && !c.sleep(ctx, c.backoff(attempt)) {
-			c.breaker.abort()
+			b.abort()
 			return ctxError(op, ctx)
 		}
 		err = c.attempt(ctx, op, path, query, out)
 		if err == nil {
-			c.breaker.success()
+			b.success()
 			return nil
 		}
 		c.logger.DebugContext(ctx, "billing request failed", "op", op, "reason", err.Reason, "attempt", attempt+1)
 		if ctx.Err() != nil {
-			c.breaker.abort()
+			b.abort()
 			return ctxError(op, ctx)
 		}
 		if !err.Retryable {
-			c.breaker.success()
+			b.success()
 			return err
 		}
 	}
-	c.breaker.failure()
+	b.failure()
 	return err
 }
 

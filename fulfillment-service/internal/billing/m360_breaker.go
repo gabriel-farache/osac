@@ -33,7 +33,11 @@ func newBreaker(threshold int, cooldown time.Duration) *breaker {
 	return &breaker{threshold: threshold, cooldown: cooldown, now: time.Now}
 }
 
+// A nil breaker is a pass-through for calls that must not be guarded.
 func (b *breaker) allow() bool {
+	if b == nil {
+		return true
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.openUntil.IsZero() {
@@ -47,12 +51,18 @@ func (b *breaker) allow() bool {
 }
 
 func (b *breaker) success() {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.failures, b.openUntil, b.probing = 0, time.Time{}, false
 }
 
 func (b *breaker) failure() {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.probing = false
@@ -64,6 +74,9 @@ func (b *breaker) failure() {
 
 // abort releases a half-open probe that ended without a verdict, such as a caller cancellation.
 func (b *breaker) abort() {
+	if b == nil {
+		return
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.probing = false
