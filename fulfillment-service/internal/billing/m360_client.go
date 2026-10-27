@@ -129,6 +129,16 @@ func (c *m360Client) attempt(ctx context.Context, op, path string, query url.Val
 	return nil
 }
 
+// notFoundOn404 reclassifies a 404 as NOT_FOUND. Only reads of a resource addressed by id call it: a 404 on a
+// collection route means a wrong base URL or API version and stays MALFORMED.
+func notFoundOn404(err error) error {
+	var e *Error
+	if errors.As(err, &e) && e.status == http.StatusNotFound {
+		return &Error{Reason: ReasonNotFound, Op: e.Op, status: e.status}
+	}
+	return err
+}
+
 func classifyStatus(op string, status int) *Error {
 	e := &Error{Op: op, status: status}
 	switch {

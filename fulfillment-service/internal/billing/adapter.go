@@ -17,7 +17,10 @@ import "context"
 
 // Adapter is the only boundary through which OSAC talks to a billing provider. It exposes normalized values only.
 type Adapter interface {
-	ListAccounts(ctx context.Context, page Page) (AccountPage, error)
+	// ListAccounts pages through accounts that exactly match filter. A page may hold fewer accounts than its size,
+	// or none, while Next is still set, so callers must keep paging until Next is empty.
+	ListAccounts(ctx context.Context, filter AccountFilter, page Page) (AccountPage, error)
+	// GetAccount and CorrelationValue fail with a NOT_FOUND *Error when the account does not exist.
 	GetAccount(ctx context.Context, ref AccountRef) (Account, error)
 
 	// CorrelationValue returns the provider-side correlation value of an account; present is false when the

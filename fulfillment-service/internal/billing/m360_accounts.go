@@ -29,6 +29,7 @@ const (
 // M360 wire shapes for accounts live here so a change in the provider contract touches one place.
 type m360Account struct {
 	ID             string `json:"Id"`
+	Name           string `json:"Name"`
 	ExternalID     string `json:"ExternalId"`
 	Status         string `json:"Status"`
 	ApprovalStatus string `json:"ApprovalStatus"`
@@ -52,6 +53,7 @@ func (a m360Account) normalize(op string) (Account, error) {
 	}
 	return Account{
 		Ref:            NewAccountRef(a.ID),
+		Name:           a.Name,
 		ExternalID:     a.ExternalID,
 		State:          state,
 		RawStatus:      a.Status,
@@ -59,7 +61,7 @@ func (a m360Account) normalize(op string) (Account, error) {
 	}, nil
 }
 
-func (m *m360) ListAccounts(ctx context.Context, page Page) (AccountPage, error) {
+func (m *m360) ListAccounts(ctx context.Context, filter AccountFilter, page Page) (AccountPage, error) {
 	const op = "ListAccounts"
 	size := page.Size
 	if size <= 0 || size > maxPageSize {
@@ -68,6 +70,14 @@ func (m *m360) ListAccounts(ctx context.Context, page Page) (AccountPage, error)
 	query := url.Values{"pageSize": {strconv.Itoa(size)}}
 	if page.Token != "" {
 		query.Set("page", page.Token)
+	}
+	// q is a case-insensitive substring search over name, number and externalId, so it only narrows the
+	// candidates; the exact match below is what decides.
+	switch {
+	case filter.ExternalID != "":
+		query.Set("q", filter.ExternalID)
+	case filter.Name != "":
+		query.Set("q", filter.Name)
 	}
 	var list m360AccountList
 	if err := m.client.get(ctx, op, "/accounts", query, &list); err != nil {
@@ -79,7 +89,10 @@ func (m *m360) ListAccounts(ctx context.Context, page Page) (AccountPage, error)
 		if err != nil {
 			return AccountPage{}, err
 		}
-		result.Accounts = append(result.Accounts, account)
+		if (filter.ExternalID == "" || account.ExternalID == filter.ExternalID) &&
+			(filter.Name == "" || account.Name == filter.Name) {
+			result.Accounts = append(result.Accounts, account)
+		}
 	}
 	return result, nil
 }
@@ -88,7 +101,7 @@ func (m *m360) GetAccount(ctx context.Context, ref AccountRef) (Account, error) 
 	const op = "GetAccount"
 	var raw m360Account
 	if err := m.client.get(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &raw); err != nil {
-		return Account{}, err
+		return Account{}, notFoundOn404(err)
 	}
 	return raw.normalize(op)
 }
