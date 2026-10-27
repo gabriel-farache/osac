@@ -103,7 +103,7 @@ func (a *adapter) GetAccount(ctx context.Context, ref billing.AccountRef) (billi
 	const op = "GetAccount"
 	var raw account
 	if err := a.client.getDiscovery(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &raw); err != nil {
-		return billing.Account{}, notFoundOn404(err)
+		return billing.Account{}, notFoundOn404(op, err)
 	}
 	return raw.normalize(op)
 }

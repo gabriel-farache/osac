@@ -48,6 +48,15 @@ func newFakeServer(h http.HandlerFunc) *fakeServer {
 	return f
 }
 
+// expectOnlyGET closes the fake and fails the spec if the adapter ever sent anything but a GET.
+func (f *fakeServer) expectOnlyGET() {
+	f.Close()
+	close(f.methods)
+	for m := range f.methods {
+		ExpectWithOffset(1, m).To(Equal(http.MethodGet), "only GET may ever be sent")
+	}
+}
+
 func testClient(url string) *client {
 	c := newClient(billing.Config{BaseURL: url, APIVersion: "v2", Credential: testToken}, logger)
 	c.backoffBase = time.Millisecond
@@ -65,11 +74,7 @@ var _ = Describe("M360 transport", func() {
 	var fake *fakeServer
 
 	AfterEach(func() {
-		fake.Close()
-		close(fake.methods)
-		for m := range fake.methods {
-			Expect(m).To(Equal(http.MethodGet), "only GET may ever be sent")
-		}
+		fake.expectOnlyGET()
 	})
 
 	It("sends bearer token and addresses the configured API version", func() {

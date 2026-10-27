@@ -47,11 +47,7 @@ var _ = Describe("M360 accounts", func() {
 	}
 
 	AfterEach(func() {
-		fake.Close()
-		close(fake.methods)
-		for m := range fake.methods {
-			Expect(m).To(Equal(http.MethodGet))
-		}
+		fake.expectOnlyGET()
 	})
 
 	Describe("ListAccounts", func() {

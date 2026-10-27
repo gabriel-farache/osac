@@ -90,8 +90,8 @@ func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (billing
 	return billing.ServiceRef{}, &billing.Error{Reason: billing.ReasonAmbiguous, Op: "FindServiceByName"}
 }
 
-func (f *fakeAdapter) ListPriceableAttributes(context.Context, billing.ServiceRef) ([]billing.PriceableAttribute, error) {
-	return []billing.PriceableAttribute{{Name: "gpu_hours"}}, nil
+func (f *fakeAdapter) ListPriceableAttributes(context.Context, billing.ServiceRef) ([]string, error) {
+	return []string{"gpu_hours"}, nil
 }
 
 func (f *fakeAdapter) GetServiceRateCard(_ context.Context, svc billing.ServiceRef, currency string) (billing.RateCard, error) {
