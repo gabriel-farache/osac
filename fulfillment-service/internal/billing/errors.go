@@ -48,3 +48,6 @@ func (e *Error) Error() string {
 
 // ErrServiceNotFound reports that no provider service matched the requested name exactly.
 var ErrServiceNotFound = errors.New("billing service not found")
+
+// ErrRateCardNotFound reports that the provider has no rate card for the requested service and currency.
+var ErrRateCardNotFound = errors.New("billing rate card not found")
