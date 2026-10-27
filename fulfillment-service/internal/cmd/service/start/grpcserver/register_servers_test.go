@@ -44,6 +44,7 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/auth"
+	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 	"github.com/osac-project/osac/fulfillment-service/internal/database"
 	"github.com/osac-project/osac/fulfillment-service/internal/database/dao"
 	hubscheme "github.com/osac-project/osac/fulfillment-service/internal/kubernetes/scheme"
@@ -200,6 +201,8 @@ var _ = BeforeSuite(func() {
 		SecretStore:             vault.NewMockSecretStore(ctrl),
 		TierResolver:            tierResolver,
 		PrivateUsersServer:      privateUsersServer,
+		BillingAdapter:          noAccountsAdapter{},
+		BillingProviderKey:      "test",
 		Services:                &services.Flags{CaaS: true, VMaaS: true, BMaaS: true, MaaS: true},
 	})
 	Expect(err).ToNot(HaveOccurred())
@@ -449,6 +452,17 @@ func dedupeByResource(cases []filterOracleCase) []filterOracleCase {
 	return result
 }
 
+// noAccountsAdapter is a billing provider without accounts. It lets the billing accounts List method run past the
+// billing-disabled check, so that the filter oracle below exercises its filter validation like any other resource.
+type noAccountsAdapter struct {
+	billing.Adapter
+}
+
+func (noAccountsAdapter) ListAccounts(context.Context, billing.AccountFilter,
+	billing.Page) (billing.AccountPage, error) {
+	return billing.AccountPage{}, nil
+}
+
 // registerWithFlags creates a gRPC server, registers resource servers with the given service flags,
 // and returns the registered service names via GetServiceInfo.
 func registerWithFlags(svcFlags *services.Flags) (map[string]grpc.ServiceInfo, *ResourceServers, error) {
@@ -463,6 +477,8 @@ func registerWithFlags(svcFlags *services.Flags) (map[string]grpc.ServiceInfo, *
 		SecretStore:             vault.NewMockSecretStore(ctrl),
 		TierResolver:            tierResolver,
 		PrivateUsersServer:      nil,
+		BillingAdapter:          noAccountsAdapter{},
+		BillingProviderKey:      "test",
 		Services:                svcFlags,
 	})
 	if err != nil {
@@ -531,6 +547,8 @@ var _ = Describe("Conditional service registration", func() {
 		"osac.public.v1.Users",
 		"osac.public.v1.Secrets",
 		"osac.public.v1.StorageTiers",
+		"osac.public.v1.BillingAccounts",
+		"osac.private.v1.BillingAccounts",
 		"osac.private.v1.Hubs",
 		"osac.private.v1.VirtualNetworks",
 		"osac.private.v1.Subnets",

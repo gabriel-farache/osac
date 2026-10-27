@@ -219,6 +219,33 @@ var _ = Describe("OPA Authorization Evaluator", func() {
 				Expect(getDecision.Allowed).To(BeFalse())
 			})
 
+			It("Denies tenant admins and tenant users the billing account list", func(ctx context.Context) {
+				for _, role := range []string{"user", "tenant-admin"} {
+					authContext := &AuthContext{
+						Username:     "john.doe",
+						AuthMethod:   "jwt",
+						Organization: []any{"acme-corp"},
+						RealmAccess:  map[string]any{"roles": []any{role}},
+					}
+					for _, method := range []string{"/osac.public.v1.BillingAccounts/List", "/osac.private.v1.BillingAccounts/List"} {
+						decision, err := evaluator.Evaluate(ctx, authContext, method)
+						Expect(err).ToNot(HaveOccurred())
+						Expect(decision.Allowed).To(BeFalse(), "role %s, method %s", role, method)
+					}
+				}
+			})
+
+			It("Allows the Cloud Provider Admin the billing account list", func(ctx context.Context) {
+				authContext := &AuthContext{
+					Username:   fmt.Sprintf("system:serviceaccount:%s:admin", testNamespace),
+					Groups:     []any{"system:serviceaccounts"},
+					AuthMethod: "serviceaccount",
+				}
+				decision, err := evaluator.Evaluate(ctx, authContext, "/osac.public.v1.BillingAccounts/List")
+				Expect(err).ToNot(HaveOccurred())
+				Expect(decision.Allowed).To(BeTrue())
+			})
+
 			It("Makes authorization decision for user accessing different organization", func(ctx context.Context) {
 				authContext := &AuthContext{
 					Username:     "john.doe",

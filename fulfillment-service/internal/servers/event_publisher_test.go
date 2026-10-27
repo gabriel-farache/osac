@@ -563,6 +563,34 @@ var _ = Describe("Event publisher", Ordered, func() {
 			Expect(events[0].event.GetStorageBackend().GetSpec().GetCredentials().GetPassword()).To(BeEmpty())
 		})
 
+		It("Redacts the billing account provider reference and correlation id before publishing", func() {
+			tenant := "billing-" + uuid.New()
+			topic := DefaultEventTopicPrefix + tenant
+			payload, err := protojson.Marshal(privatev1.BillingAccount_builder{
+				ProviderKey:              "m360",
+				ProviderAccountReference: "native-1",
+				DisplayName:              "Acme",
+				CorrelationId:            proto.String("corr-1"),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+			insertChange("billing_accounts", tenant, "ba-1", fmt.Sprintf(`{
+				"id": "ba-1",
+				"name": "",
+				"tenant": %q,
+				"data": %s
+			}`, tenant, payload))
+
+			cancel, done := startPublisher(pub)
+			defer stopPublisher(cancel, done)
+
+			events := collectKafkaEvents(client, topic, 1)
+			account := events[0].event.GetBillingAccount()
+			Expect(account.GetId()).To(Equal("ba-1"))
+			Expect(account.GetDisplayName()).To(Equal("Acme"))
+			Expect(account.GetProviderAccountReference()).To(BeEmpty())
+			Expect(account.HasCorrelationId()).To(BeFalse())
+		})
+
 		It("Redacts user credentials before publishing", func() {
 			tenant := "user-" + uuid.New()
 			topic := DefaultEventTopicPrefix + tenant
