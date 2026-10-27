@@ -37,6 +37,9 @@ type Error struct {
 	Reason    Reason
 	Op        string
 	Retryable bool
+
+	// status is the HTTP status that produced the error, 0 when none; kept private so callers branch on Reason.
+	status int
 }
 
 func (e *Error) Error() string {
