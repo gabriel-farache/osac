@@ -17,24 +17,32 @@ import "log/slog"
 
 const redacted = "[redacted]"
 
+// opaque hides a value in every default rendering: String, GoString (%#v) and structured logging. Types holding
+// provider ids or credentials embed it so that adding a type cannot silently leave one rendering unredacted.
+type opaque struct{}
+
+func (opaque) String() string       { return redacted }
+func (opaque) GoString() string     { return redacted }
+func (opaque) LogValue() slog.Value { return slog.StringValue(redacted) }
+
 // AccountRef identifies a provider account. The native id is only reachable through ID so that accidental
 // formatting or logging cannot leak it.
-type AccountRef struct{ id string }
+type AccountRef struct {
+	opaque
+	id string
+}
 
 func NewAccountRef(id string) AccountRef { return AccountRef{id: id} }
 func (r AccountRef) ID() string          { return r.id }
-func (AccountRef) String() string        { return redacted }
-func (AccountRef) GoString() string      { return redacted }
-func (AccountRef) LogValue() slog.Value  { return slog.StringValue(redacted) }
 
 // ServiceRef identifies a provider service. It follows the same redaction rules as AccountRef.
-type ServiceRef struct{ id string }
+type ServiceRef struct {
+	opaque
+	id string
+}
 
 func NewServiceRef(id string) ServiceRef { return ServiceRef{id: id} }
 func (r ServiceRef) ID() string          { return r.id }
-func (ServiceRef) String() string        { return redacted }
-func (ServiceRef) GoString() string      { return redacted }
-func (ServiceRef) LogValue() slog.Value  { return slog.StringValue(redacted) }
 
 type AccountState string
 
@@ -44,8 +52,10 @@ const (
 	AccountUnknown  AccountState = "UNKNOWN"
 )
 
-// Account keeps the raw provider status values next to the normalized state.
+// Account keeps the raw provider status values next to the normalized state. Its correlation value is
+// ExternalID, which must never reach logs or formatted output.
 type Account struct {
+	opaque
 	Ref            AccountRef
 	Name           string
 	ExternalID     string
@@ -53,11 +63,6 @@ type Account struct {
 	RawStatus      string
 	ApprovalStatus string
 }
-
-// ExternalID is the provider correlation value and must never reach logs or formatted output.
-func (Account) String() string       { return redacted }
-func (Account) GoString() string     { return redacted }
-func (Account) LogValue() slog.Value { return slog.StringValue(redacted) }
 
 // AccountFilter narrows ListAccounts to exact matches; zero fields are ignored. When both are set an account must
 // match both.
@@ -76,8 +81,6 @@ type AccountPage struct {
 	Accounts []Account
 	Next     string
 }
-
-type PriceableAttribute struct{ Name string }
 
 type RateRow struct {
 	Dimension string

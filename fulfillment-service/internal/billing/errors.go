@@ -13,10 +13,7 @@ language governing permissions and limitations under the License.
 
 package billing
 
-import (
-	"errors"
-	"fmt"
-)
+import "fmt"
 
 // Reason is a stable failure code that is safe to log and return to callers.
 type Reason string
@@ -30,7 +27,7 @@ const (
 	ReasonConflict      Reason = "CONFLICT"
 	ReasonUnsupported   Reason = "UNSUPPORTED"
 	ReasonAmbiguous     Reason = "AMBIGUOUS"
-	ReasonNotFound      Reason = "NOT_FOUND" // a specific provider resource addressed by id does not exist
+	ReasonNotFound      Reason = "NOT_FOUND" // the addressed provider resource does not exist
 )
 
 // Error is a classified adapter failure. It deliberately carries no provider body or native identifier.
@@ -57,8 +54,9 @@ func NewError(reason Reason, op string, retryable bool, status int) *Error {
 // reclassify failures; callers should branch on Reason instead.
 func (e *Error) HTTPStatus() int { return e.status }
 
-// ErrServiceNotFound reports that no provider service matched the requested name exactly.
-var ErrServiceNotFound = errors.New("billing service not found")
+// ErrServiceNotFound reports that no provider service matched the requested name exactly. It is a NOT_FOUND
+// *Error, so callers can match it with errors.Is or branch on Reason like any other adapter failure.
+var ErrServiceNotFound = &Error{Reason: ReasonNotFound, Op: "FindServiceByName"}
 
 // ErrRateCardNotFound reports that the provider has no rate card for the requested service and currency.
-var ErrRateCardNotFound = errors.New("billing rate card not found")
+var ErrRateCardNotFound = &Error{Reason: ReasonNotFound, Op: "GetServiceRateCard"}

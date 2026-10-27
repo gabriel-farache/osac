@@ -48,11 +48,7 @@ var _ = Describe("M360 services", func() {
 	}
 
 	AfterEach(func() {
-		fake.Close()
-		close(fake.methods)
-		for m := range fake.methods {
-			Expect(m).To(Equal(http.MethodGet))
-		}
+		fake.expectOnlyGET()
 		mu.Lock()
 		defer mu.Unlock()
 		for _, p := range paths {
@@ -162,7 +158,7 @@ var _ = Describe("M360 services", func() {
 			})
 			attrs, err := adapter.ListPriceableAttributes(context.Background(), billing.NewServiceRef("svc 1"))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(attrs).To(Equal([]billing.PriceableAttribute{{Name: "gpu_hours"}, {Name: "storage_gb"}}))
+			Expect(attrs).To(Equal([]string{"gpu_hours", "storage_gb"}))
 			Expect(paths).To(ConsistOf("/api/v2/services/svc%201/priceable-attributes"))
 		})
 

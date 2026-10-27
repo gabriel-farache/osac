@@ -16,8 +16,6 @@ package m360
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -93,15 +91,15 @@ func (a *adapter) FindServiceByName(ctx context.Context, name string) (billing.S
 	}
 }
 
-func (a *adapter) ListPriceableAttributes(ctx context.Context, svc billing.ServiceRef) ([]billing.PriceableAttribute, error) {
+func (a *adapter) ListPriceableAttributes(ctx context.Context, svc billing.ServiceRef) ([]string, error) {
 	const op = "ListPriceableAttributes"
 	var list attributeList
 	if err := a.client.get(ctx, op, "/services/"+url.PathEscape(svc.ID())+"/priceable-attributes", nil, &list); err != nil {
-		return nil, notFoundOn404(err)
+		return nil, notFoundOn404(op, err)
 	}
-	attrs := make([]billing.PriceableAttribute, 0, len(list.Items))
+	attrs := make([]string, 0, len(list.Items))
 	for _, item := range list.Items {
-		attrs = append(attrs, billing.PriceableAttribute{Name: item.Name})
+		attrs = append(attrs, item.Name)
 	}
 	return attrs, nil
 }
@@ -114,8 +112,7 @@ func (a *adapter) GetServiceRateCard(ctx context.Context, svc billing.ServiceRef
 	var raw rateCard
 	path := "/services/" + url.PathEscape(svc.ID()) + "/rate-cards/" + url.PathEscape(currency)
 	if err := a.client.get(ctx, op, path, nil, &raw); err != nil {
-		var e *billing.Error
-		if errors.As(err, &e) && e.HTTPStatus() == http.StatusNotFound {
+		if isNotFound(err) {
 			return billing.RateCard{}, billing.ErrRateCardNotFound
 		}
 		return billing.RateCard{}, err

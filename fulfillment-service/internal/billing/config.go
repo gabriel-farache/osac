@@ -13,10 +13,10 @@ language governing permissions and limitations under the License.
 
 package billing
 
-import "log/slog"
-
-// Config is supplied by the caller; this package reads no flags, environment or files.
+// Config is supplied by the caller; this package reads no flags, environment or files. Embedding opaque keeps the
+// credential out of logs and formatted output.
 type Config struct {
+	opaque
 	BaseURL    string
 	APIVersion string
 	Credential string
@@ -29,8 +29,3 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
-
-// The credential must never reach logs or formatted output.
-func (Config) String() string       { return redacted }
-func (Config) GoString() string     { return redacted }
-func (Config) LogValue() slog.Value { return slog.StringValue(redacted) }

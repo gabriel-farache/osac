@@ -147,7 +147,7 @@ var _ = Describe("Adapter contract", func() {
 				Expect(err).ToNot(HaveOccurred())
 				attrs, err := adapter.ListPriceableAttributes(ctx, svc)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(attrs).To(Equal([]billing.PriceableAttribute{{Name: "gpu_hours"}}))
+				Expect(attrs).To(Equal([]string{"gpu_hours"}))
 				card, err := adapter.GetServiceRateCard(ctx, svc, "USD")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(card).To(Equal(billing.RateCard{Currency: "USD", Rows: []billing.RateRow{{Dimension: "gpu_hours", Amount: "0.25"}}}))

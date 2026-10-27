@@ -142,14 +142,19 @@ func (c *client) attempt(ctx context.Context, op, path string, query url.Values,
 	return nil
 }
 
+// isNotFound reports whether err carries a provider 404.
+func isNotFound(err error) bool {
+	var e *billing.Error
+	return errors.As(err, &e) && e.HTTPStatus() == http.StatusNotFound
+}
+
 // notFoundOn404 reclassifies a 404 as NOT_FOUND. Only reads of a resource addressed by id call it: a 404 on a
 // collection route means a wrong base URL or API version and stays MALFORMED.
-func notFoundOn404(err error) error {
-	var e *billing.Error
-	if errors.As(err, &e) && e.HTTPStatus() == http.StatusNotFound {
-		return billing.NewError(billing.ReasonNotFound, e.Op, false, http.StatusNotFound)
+func notFoundOn404(op string, err error) error {
+	if !isNotFound(err) {
+		return err
 	}
-	return err
+	return billing.NewError(billing.ReasonNotFound, op, false, http.StatusNotFound)
 }
 
 func classifyStatus(op string, status int) *billing.Error {

@@ -30,7 +30,9 @@ type Adapter interface {
 	// FindServiceByName returns the single service whose name matches exactly, ErrServiceNotFound when none
 	// does, and an AMBIGUOUS *Error when several do.
 	FindServiceByName(ctx context.Context, name string) (ServiceRef, error)
-	ListPriceableAttributes(ctx context.Context, svc ServiceRef) ([]PriceableAttribute, error)
+	// ListPriceableAttributes returns the provider's priceable-attribute names, which OSAC dimension names must
+	// equal exactly.
+	ListPriceableAttributes(ctx context.Context, svc ServiceRef) ([]string, error)
 	GetServiceRateCard(ctx context.Context, svc ServiceRef, currency string) (RateCard, error)
 	HealthCheck(ctx context.Context) error
 
