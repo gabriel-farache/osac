@@ -55,6 +55,8 @@ var _ = Describe("Opaque refs", func() {
 		},
 		Entry("account ref", NewAccountRef(native)),
 		Entry("service ref", NewServiceRef(native)),
+		Entry("config credential", Config{Credential: native}),
+		Entry("account correlation value", Account{ExternalID: native}),
 	)
 
 	It("round-trips the id for the adapter that issued it", func() {
