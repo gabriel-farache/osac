@@ -47,9 +47,6 @@ create table archived_billing_accounts (
   version integer not null default 0
 );
 
-create index billing_accounts_by_creator on billing_accounts (creator);
-create index billing_accounts_by_label on billing_accounts using gin (labels);
-
 -- One row per provider account.
 create unique index billing_accounts_unique_provider_account
   on billing_accounts ((data->>'provider_key'), (data->>'provider_account_reference'));

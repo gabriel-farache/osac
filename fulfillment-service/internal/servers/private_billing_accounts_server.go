@@ -192,6 +192,10 @@ func billingStatus(code grpccodes.Code, reason, message string) error {
 	return result.Err()
 }
 
+func errBillingProviderUnavailable() error {
+	return billingStatus(grpccodes.Unavailable, "BILLING_PROVIDER_UNAVAILABLE", "the billing provider is unavailable")
+}
+
 // refresh brings the stored accounts in line with the provider. Provider values are never logged.
 func (s *PrivateBillingAccountsServer) refresh(ctx context.Context) error {
 	s.refreshLock.Lock()
@@ -308,8 +312,7 @@ func (s *PrivateBillingAccountsServer) providerAccounts(ctx context.Context) ([]
 				reason = string(billingErr.Reason)
 			}
 			s.logger.WarnContext(ctx, "Failed to list the billing provider accounts", slog.String("reason", reason))
-			return nil, billingStatus(grpccodes.Unavailable, "BILLING_PROVIDER_UNAVAILABLE",
-				"the billing provider is unavailable")
+			return nil, errBillingProviderUnavailable()
 		}
 		for _, account := range accountPage.Accounts {
 			if !seen[account.Ref.ID()] {
@@ -322,8 +325,7 @@ func (s *PrivateBillingAccountsServer) providerAccounts(ctx context.Context) ([]
 		}
 		if tokens[accountPage.Next] {
 			s.logger.WarnContext(ctx, "The billing provider repeated a page token")
-			return nil, billingStatus(grpccodes.Unavailable, "BILLING_PROVIDER_UNAVAILABLE",
-				"the billing provider is unavailable")
+			return nil, errBillingProviderUnavailable()
 		}
 		tokens[accountPage.Next] = true
 		page.Token = accountPage.Next
