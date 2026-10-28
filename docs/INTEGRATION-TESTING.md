@@ -361,6 +361,24 @@ the certificate. The Kind
 `SUITE=fulfillment` target exercises deployed startup and API behavior, subject
 to the profile's configured CA and enabled services.
 
+The `make billing-render-test` Helm contract renders the umbrella chart with
+and without `global.billing.provider`. It asserts the credential Secret is
+mounted only when configured, that no credential value is rendered, and that
+the schema and template checks reject partial, second-provider, out-of-range
+and inverted tuning values. It checks rendered manifests only; it does not
+install against a provider (the fulfillment install test is Story 1.05)
+and does not cover how metering consumes the block.
+
+The chart hands the block to the fulfillment gRPC server as `OSAC_BILLING_*`
+environment variables. `OSAC_BILLING_PROVIDER`, `_BASE_URL`, `_API_VERSION`
+and `_CREDENTIAL_FILE` are consumed by the fulfillment loader
+`billing.LoadConfig`. The tuning variables `_ITEM_TIMEOUT_SECONDS`,
+`_LIST_DEADLINE_SECONDS`, `_CACHE_FRESH_TTL_SECONDS`,
+`_CACHE_STALE_TTL_SECONDS`, `_CACHE_MAX_ENTRIES`, `_RETRY_COUNT`,
+`_PRICING_BREAKER_FAILURE_THRESHOLD`, `_PRICING_BREAKER_FAILURE_WINDOW_SECONDS`
+and `_PRICING_BREAKER_OPEN_SECONDS` have no Go consumer yet; stories 5.02 and
+7.01 will consume them. Renaming a variable breaks that contract on both sides.
+
 ### OSAC-5343 deployed enablement coverage
 
 The release E2E path adds these assertions to existing user journeys. The
