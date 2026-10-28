@@ -58,7 +58,7 @@ func (f *fakeServer) expectOnlyGET() {
 }
 
 func testClient(url string) *client {
-	c := newClient(billing.Config{BaseURL: url, APIVersion: "v2", Credential: testToken}, logger)
+	c := newClient(billing.Config{BaseURL: url, APIVersion: "v1", Credential: testToken}, logger)
 	c.backoffBase = time.Millisecond
 	c.backoffMax = 2 * time.Millisecond
 	return c
@@ -77,7 +77,7 @@ var _ = Describe("M360 transport", func() {
 		fake.expectOnlyGET()
 	})
 
-	It("sends bearer token and addresses the configured API version", func() {
+	It("sends bearer token and addresses the external API of the configured version", func() {
 		var auth, path string
 		fake = newFakeServer(func(w http.ResponseWriter, r *http.Request) {
 			auth, path = r.Header.Get("Authorization"), r.URL.Path
@@ -86,7 +86,7 @@ var _ = Describe("M360 transport", func() {
 		var out struct{ OK bool }
 		Expect(testClient(fake.URL).get(context.Background(), "op", "/accounts", nil, &out)).To(Succeed())
 		Expect(auth).To(Equal("Bearer " + testToken))
-		Expect(path).To(Equal("/api/v2/accounts"))
+		Expect(path).To(Equal("/api/v1/external/accounts"))
 		Expect(out.OK).To(BeTrue())
 	})
 
@@ -149,16 +149,42 @@ var _ = Describe("M360 transport", func() {
 	DescribeTable("treats bad 2xx bodies as MALFORMED, never as empty data",
 		func(body string) {
 			fake = newFakeServer(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
-			var out struct{ Items []string }
+			var out envelope[pageData[account]]
 			err := testClient(fake.URL).get(context.Background(), "op", "/x", nil, &out)
 			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
 			Expect(fake.hits.Load()).To(Equal(int32(1)))
 		},
 		Entry("not json", "<html>"),
 		Entry("empty body", ""),
-		Entry("wrong shape", `{"Items":"nope"}`),
+		Entry("wrong shape", `{"success":true,"errors":[],"data":{"content":"nope"}}`),
 		Entry("error envelope", `{"error":{"code":"X","message":"boom"}}`),
+		Entry("success false", `{"success":false,"errors":[],"data":{"content":[]}}`),
+		Entry("success missing", `{"errors":[],"data":{"content":[]}}`),
+		Entry("errors reported", `{"success":true,"errors":[{"code":"X"}],"data":{"content":[]}}`),
+		Entry("data null", `{"success":true,"errors":[],"data":null}`),
+		Entry("data missing", `{"success":true,"errors":[]}`),
+		Entry("old Items shape", `{"Items":[{"Id":"a1"}],"NextPage":"2"}`),
 	)
+
+	It("does not follow redirects, so the token never leaves for another path", func() {
+		var elsewhere atomic.Int32
+		fake = newFakeServer(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/elsewhere" {
+				elsewhere.Add(1)
+				_, _ = w.Write([]byte(`{"success":true,"errors":[],"data":{"content":[]}}`))
+				return
+			}
+			http.Redirect(w, r, "/elsewhere", http.StatusFound)
+		})
+		var out envelope[pageData[account]]
+		err := testClient(fake.URL).get(context.Background(), "op", "/accounts", nil, &out)
+		var e *billing.Error
+		Expect(errors.As(err, &e)).To(BeTrue())
+		Expect(e.Reason).To(Equal(billing.ReasonMalformed))
+		Expect(e.Retryable).To(BeFalse())
+		Expect(fake.hits.Load()).To(Equal(int32(1)))
+		Expect(elsewhere.Load()).To(BeZero())
+	})
 
 	Describe("pricing breaker", func() {
 		It("opens after 5 consecutive exhausted failures, then probes and recovers", func() {

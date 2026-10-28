@@ -14,6 +14,7 @@ specific language governing permissions and limitations under the License.
 package m360
 
 import (
+	"fmt"
 	"log/slog"
 	"testing"
 
@@ -38,3 +39,14 @@ var _ = BeforeSuite(func() {
 		Build()
 	Expect(err).ToNot(HaveOccurred())
 })
+
+// listBody is an M360 page in the ApiResponse envelope; content is the raw JSON array of items.
+func listBody(number int, last bool, content string) string {
+	return fmt.Sprintf(`{"success":true,"status":200,"errors":[],"data":{"content":%s,"number":%d,"size":20,"last":%t}}`,
+		content, number, last)
+}
+
+// dataBody is a single record in the ApiResponse envelope.
+func dataBody(data string) string {
+	return `{"success":true,"status":200,"errors":[],"data":` + data + `}`
+}

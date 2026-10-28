@@ -137,4 +137,27 @@ var _ = Describe("LoadConfig", func() {
 	})
 })
 
+var _ = DescribeTable("Config.Validate checks the base URL",
+	func(baseURL string, valid bool) {
+		cfg := billing.Config{BaseURL: baseURL, APIVersion: "v1", Credential: "tok"}
+		err := cfg.Validate()
+		if valid {
+			Expect(err).ToNot(HaveOccurred())
+			return
+		}
+		var be *billing.Error
+		Expect(errors.As(err, &be)).To(BeTrue())
+		Expect(be.Reason).To(Equal(billing.ReasonNotConfigured))
+	},
+	Entry("https host", "https://revos.example.com", true),
+	Entry("http loopback name", "http://localhost:8080", true),
+	Entry("http loopback IPv4", "http://127.0.0.1:8080", true),
+	Entry("http loopback IPv6", "http://[::1]:8080", true),
+	Entry("http remote host leaks the token", "http://revos.example.com", false),
+	Entry("no scheme", "revos.example.com", false),
+	Entry("other scheme", "ftp://revos.example.com", false),
+	Entry("empty host", "https://", false),
+	Entry("unparsable", "https://exa mple.com", false),
+)
+
 func ptr(s string) *string { return &s }

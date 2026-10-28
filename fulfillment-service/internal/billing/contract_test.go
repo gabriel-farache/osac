@@ -51,7 +51,7 @@ func contractReasonOf(err error) billing.Reason {
 }
 
 // Both adapters are seeded with the same logical data: one active account "acct-1" correlated to "ext-1", and a
-// service "GPU Hours" priced at 0.25 USD for gpu_hours.
+// service "GPU Hours" priced at a 0.25 USD quantity rate for gpu_hours.
 func seededFake() *fakeAdapter {
 	return &fakeAdapter{
 		accounts: map[string]*fakeNativeAccount{"acct-1": {uuid: "acct-1", state: "enabled", approval: "Approved", tag: "ext-1"}},
@@ -63,22 +63,26 @@ func seededFake() *fakeAdapter {
 
 func seededM360() (*m360Server, billing.Adapter) {
 	fake := newM360Server(func(w http.ResponseWriter, r *http.Request) {
-		switch p := strings.TrimPrefix(r.URL.Path, "/api/v2"); p {
+		page := func(content string) string {
+			return `{"success":true,"status":200,"errors":[],"data":{"content":` + content + `,"number":0,"size":20,"last":true}}`
+		}
+		const account = `{"Id":"acct-1","Name":"Acme","ExternalId":"ext-1","Status__r":{"Name":"Active"},"ApprovalStatus__r":{"Name":"Approved"}}`
+		switch p := strings.TrimPrefix(r.URL.Path, "/api/v1/external"); p {
 		case "/accounts":
-			_, _ = w.Write([]byte(`{"Items":[{"Id":"acct-1","ExternalId":"ext-1","Status":"Active","ApprovalStatus":"Approved"}]}`))
+			_, _ = w.Write([]byte(page(`[` + account + `]`)))
 		case "/accounts/acct-1":
-			_, _ = w.Write([]byte(`{"Id":"acct-1","ExternalId":"ext-1","Status":"Active","ApprovalStatus":"Approved"}`))
+			_, _ = w.Write([]byte(`{"success":true,"status":200,"errors":[],"data":` + account + `}`))
 		case "/services":
-			_, _ = w.Write([]byte(`{"Items":[{"Id":"svc-1","Name":"GPU Hours"},{"Id":"svc-2","Name":"GPU Hours Extra"}]}`))
+			_, _ = w.Write([]byte(page(`[{"Id":"svc-1","Name":"GPU Hours"},{"Id":"svc-2","Name":"GPU Hours Extra"}]`)))
 		case "/services/svc-1/priceable-attributes":
-			_, _ = w.Write([]byte(`{"Items":[{"Name":"gpu_hours"}]}`))
+			_, _ = w.Write([]byte(page(`[{"id":"dim-1","name":"gpu_hours","dimensionDataType":"NUMBER"}]`)))
 		case "/services/svc-1/rate-cards/USD":
-			_, _ = w.Write([]byte(`{"Currency":"USD","Rows":[{"Dimension":"gpu_hours","Amount":"0.25"}]}`))
+			_, _ = w.Write([]byte(`{"currency":"USD","rows":[{"priceDimId":"dim-1","priceMethod":"QUANTITY","unitRate":0.25}]}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
 	})
-	adapter, err := m360.New(billing.Config{BaseURL: fake.URL, APIVersion: "v2", Credential: contractToken}).
+	adapter, err := m360.New(billing.Config{BaseURL: fake.URL, APIVersion: "v1", Credential: contractToken}).
 		SetLogger(logger).Build()
 	Expect(err).ToNot(HaveOccurred())
 	return fake, adapter
@@ -89,6 +93,7 @@ var _ = Describe("Adapter contract", func() {
 		name      string
 		build     func() billing.Adapter
 		canWrite  bool
+		rawStatus string // the provider-native status text, kept raw for the caller to map
 		afterEach func()
 	}
 	var m360Fake *m360Server
@@ -109,7 +114,7 @@ var _ = Describe("Adapter contract", func() {
 				}
 			},
 		},
-		{name: "write-capable fake", build: func() billing.Adapter { return seededFake() }, canWrite: true},
+		{name: "write-capable fake", build: func() billing.Adapter { return seededFake() }, canWrite: true, rawStatus: "enabled"},
 	}
 
 	for _, p := range providers {
@@ -130,9 +135,14 @@ var _ = Describe("Adapter contract", func() {
 				Expect(page.Accounts).To(HaveLen(1))
 				a := page.Accounts[0]
 				Expect(a.Ref.ID()).To(Equal("acct-1"))
-				Expect(a.State).To(Equal(billing.AccountActive))
+				Expect(a.RawStatus).To(Equal(p.rawStatus))
 				Expect(a.ExternalID).To(Equal("ext-1"))
 				Expect(a.ApprovalStatus).To(Equal("Approved"))
+			})
+
+			It("reports a missing account as not-found", func() {
+				_, err := adapter.GetAccount(ctx, billing.NewAccountRef("nope"))
+				Expect(contractReasonOf(err)).To(Equal(billing.ReasonNotFound))
 			})
 
 			It("reads the correlation value of an account", func() {
@@ -150,7 +160,8 @@ var _ = Describe("Adapter contract", func() {
 				Expect(attrs).To(Equal([]string{"gpu_hours"}))
 				card, err := adapter.GetServiceRateCard(ctx, svc, "USD")
 				Expect(err).ToNot(HaveOccurred())
-				Expect(card).To(Equal(billing.RateCard{Currency: "USD", Rows: []billing.RateRow{{Dimension: "gpu_hours", Amount: "0.25"}}}))
+				Expect(card).To(Equal(billing.RateCard{Currency: "USD",
+					Rows: []billing.RateRow{{DimensionID: "dim-1", PriceMethod: "QUANTITY", UnitRate: "0.25"}}}))
 			})
 
 			It("reports an unknown service as not-found", func() {

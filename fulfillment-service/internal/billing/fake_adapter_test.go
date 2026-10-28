@@ -27,7 +27,7 @@ type fakeAdapter struct {
 	accounts map[string]*fakeNativeAccount
 	order    []string
 	services map[string]string            // native uuid -> display name
-	rates    map[string]map[string]string // service uuid -> currency -> amount
+	rates    map[string]map[string]string // service uuid -> currency -> unit rate
 }
 
 type fakeNativeAccount struct {
@@ -51,7 +51,7 @@ func (f *fakeAdapter) GetAccount(_ context.Context, ref billing.AccountRef) (bil
 	defer f.mu.Unlock()
 	a, ok := f.accounts[ref.ID()]
 	if !ok {
-		return billing.Account{}, &billing.Error{Reason: billing.ReasonMalformed, Op: "GetAccount"}
+		return billing.Account{}, &billing.Error{Reason: billing.ReasonNotFound, Op: "GetAccount"}
 	}
 	return f.toAccount(a), nil
 }
@@ -90,18 +90,18 @@ func (f *fakeAdapter) FindServiceByName(_ context.Context, name string) (billing
 	return billing.ServiceRef{}, &billing.Error{Reason: billing.ReasonAmbiguous, Op: "FindServiceByName"}
 }
 
-func (f *fakeAdapter) ListPriceableAttributes(context.Context, billing.ServiceRef) ([]string, error) {
-	return []string{"gpu_hours"}, nil
+func (f *fakeAdapter) ListPriceableAttributes(context.Context, billing.ServiceRef) ([]billing.PriceableAttribute, error) {
+	return []billing.PriceableAttribute{{ID: "dim-1", Name: "gpu_hours"}}, nil
 }
 
 func (f *fakeAdapter) GetServiceRateCard(_ context.Context, svc billing.ServiceRef, currency string) (billing.RateCard, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	amount, ok := f.rates[svc.ID()][currency]
+	rate, ok := f.rates[svc.ID()][currency]
 	if !ok {
 		return billing.RateCard{}, billing.ErrRateCardNotFound
 	}
-	return billing.RateCard{Currency: currency, Rows: []billing.RateRow{{Dimension: "gpu_hours", Amount: amount}}}, nil
+	return billing.RateCard{Currency: currency, Rows: []billing.RateRow{{DimensionID: "dim-1", PriceMethod: "QUANTITY", UnitRate: rate}}}, nil
 }
 
 func (f *fakeAdapter) HealthCheck(context.Context) error { return nil }

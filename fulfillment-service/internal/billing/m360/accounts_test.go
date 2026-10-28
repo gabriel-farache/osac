@@ -41,7 +41,7 @@ var _ = Describe("M360 accounts", func() {
 			h(w, r)
 		})
 		var err error
-		adapter, err = New(billing.Config{BaseURL: fake.URL, APIVersion: "v2", Credential: testToken}).
+		adapter, err = New(billing.Config{BaseURL: fake.URL, APIVersion: "v1", Credential: testToken}).
 			SetLogger(logger).Build()
 		Expect(err).ToNot(HaveOccurred())
 	}
@@ -51,32 +51,56 @@ var _ = Describe("M360 accounts", func() {
 	})
 
 	Describe("ListAccounts", func() {
-		It("keeps raw status fields and returns the next page token", func() {
+		It("reads raw status names from the __r objects and returns the next page token", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Items":[
-					{"Id":"a1","ExternalId":"ext-1","Status":"Active","ApprovalStatus":"Approved"},
-					{"Id":"a2","Status":"Weird","ApprovalStatus":"Pending"}],"NextPage":"p2"}`))
+				_, _ = w.Write([]byte(listBody(0, false, `[
+					{"Id":"a1","Name":"Acme","ExternalId":"ext-1","Status":null,"Status__r":null,
+					 "ApprovalStatus":"7d1b","ApprovalStatus__r":{"Name":"Approved"}},
+					{"Id":"a2","Name":"Beta","Status":"3c9e","Status__r":{"Name":"Weird"},"ApprovalStatus":"7d1b",
+					 "ApprovalStatus__r":{"Name":"Pending"}}]`)))
 			})
-			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Size: 5, Token: "p1"})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Size: 5, Token: "3"})
 			Expect(err).ToNot(HaveOccurred())
-			Expect(page.Next).To(Equal("p2"))
+			Expect(page.Next).To(Equal("1"))
 			Expect(page.Accounts).To(HaveLen(2))
 			Expect(page.Accounts[0].ExternalID).To(Equal("ext-1"))
-			Expect(page.Accounts[0].RawStatus).To(Equal("Active"))
+			Expect(page.Accounts[0].RawStatus).To(BeEmpty(), "a null Status has no readable value; the UUID is never exposed")
 			Expect(page.Accounts[0].ApprovalStatus).To(Equal("Approved"))
 			Expect(page.Accounts[0].Ref.ID()).To(Equal("a1"))
 			Expect(page.Accounts[1].ExternalID).To(BeEmpty())
+			Expect(page.Accounts[1].RawStatus).To(Equal("Weird"))
+			Expect(page.Accounts[1].ApprovalStatus).To(Equal("Pending"))
 			q := <-queries
-			Expect(q.Get("pageSize")).To(Equal("5"))
-			Expect(q.Get("page")).To(Equal("p1"))
+			Expect(q.Get("size")).To(Equal("5"))
+			Expect(q.Get("page")).To(Equal("3"))
+			Expect(q.Has("pageSize")).To(BeFalse(), "M360 ignores pageSize")
+		})
+
+		It("leaves the normalized state UNKNOWN until the design owner defines the mapping", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(listBody(0, true, `[{"Id":"a1","Status__r":{"Name":"Active"}}]`)))
+			})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(page.Accounts[0].RawStatus).To(Equal("Active"))
+			Expect(page.Accounts[0].State).To(Equal(billing.AccountUnknown))
+		})
+
+		It("ends paging on the last page", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(listBody(1, true, `[{"Id":"a21"}]`)))
+			})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Token: "1"})
+			Expect(err).ToNot(HaveOccurred())
+			Expect(page.Next).To(BeEmpty())
 		})
 
 		DescribeTable("clamps the page size to the provider maximum of 20",
 			func(requested int, sent int) {
-				build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Items":[]}`)) })
+				build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(listBody(0, true, `[]`))) })
 				_, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{Size: requested})
 				Expect(err).ToNot(HaveOccurred())
-				Expect((<-queries).Get("pageSize")).To(Equal(strconv.Itoa(sent)))
+				Expect((<-queries).Get("size")).To(Equal(strconv.Itoa(sent)))
 			},
 			Entry("zero means max", 0, 20),
 			Entry("negative means max", -3, 20),
@@ -85,7 +109,7 @@ var _ = Describe("M360 accounts", func() {
 		)
 
 		It("returns an empty page without error when the provider has no accounts", func() {
-			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Items":[]}`)) })
+			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(listBody(0, true, `[]`))) })
 			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect(page.Accounts).To(BeEmpty())
@@ -94,7 +118,7 @@ var _ = Describe("M360 accounts", func() {
 
 		It("passes duplicate accounts through unchanged", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Items":[{"Id":"a1","Status":"Active"},{"Id":"a1","Status":"Active"}]}`))
+				_, _ = w.Write([]byte(listBody(0, true, `[{"Id":"a1"},{"Id":"a1"}]`)))
 			})
 			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
@@ -103,32 +127,41 @@ var _ = Describe("M360 accounts", func() {
 
 		It("fails instead of dropping an account that has no id", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Items":[{"Status":"Active"}]}`))
+				_, _ = w.Write([]byte(listBody(0, true, `[{"Name":"Acme"}]`)))
 			})
 			_, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
 			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
 		})
 
+		It("fails instead of returning no accounts when the body is not an M360 page", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"Items":[{"Id":"a1"}],"NextPage":"2"}`))
+			})
+			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{}, billing.Page{})
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
+			Expect(page.Accounts).To(BeNil())
+		})
+
 		It("searches with q and keeps only exact externalId matches", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Items":[
+				_, _ = w.Write([]byte(listBody(0, false, `[
 					{"Id":"a1","ExternalId":"ext-1","Name":"Acme"},
-					{"Id":"a2","ExternalId":"ext-10","Name":"Acme 2"}],"NextPage":"p2"}`))
+					{"Id":"a2","ExternalId":"ext-10","Name":"Acme 2"}]`)))
 			})
 			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{ExternalID: "ext-1"}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
 			Expect((<-queries).Get("q")).To(Equal("ext-1"))
 			Expect(page.Accounts).To(HaveLen(1))
 			Expect(page.Accounts[0].Ref.ID()).To(Equal("a1"))
-			Expect(page.Next).To(Equal("p2"), "paging must continue even after a filtered page")
+			Expect(page.Next).To(Equal("1"), "paging must continue even after a filtered page")
 		})
 
 		It("filters by exact name and requires every set field to match", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Items":[
+				_, _ = w.Write([]byte(listBody(0, true, `[
 					{"Id":"a1","ExternalId":"ext-1","Name":"Acme"},
 					{"Id":"a2","ExternalId":"ext-2","Name":"Acme"},
-					{"Id":"a3","ExternalId":"ext-3","Name":"Acme Corp"}]}`))
+					{"Id":"a3","ExternalId":"ext-3","Name":"Acme Corp"}]`)))
 			})
 			page, err := adapter.ListAccounts(context.Background(), billing.AccountFilter{Name: "Acme"}, billing.Page{})
 			Expect(err).ToNot(HaveOccurred())
@@ -150,17 +183,19 @@ var _ = Describe("M360 accounts", func() {
 	})
 
 	Describe("GetAccount and CorrelationValue", func() {
-		It("reads one account by its native id", func() {
+		It("reads one account by its native id from the external API", func() {
 			var path string
 			build(func(w http.ResponseWriter, r *http.Request) {
 				path = r.URL.EscapedPath()
-				_, _ = w.Write([]byte(`{"Id":"a/1","ExternalId":"ext-1","Status":"Inactive","ApprovalStatus":"Approved"}`))
+				_, _ = w.Write([]byte(dataBody(`{"Id":"a/1","ExternalId":"ext-1","Status__r":{"Name":"Inactive"},
+					"ApprovalStatus__r":{"Name":"Approved"}}`)))
 			})
 			acct, err := adapter.GetAccount(context.Background(), billing.NewAccountRef("a/1"))
 			Expect(err).ToNot(HaveOccurred())
-			Expect(path).To(Equal("/api/v2/accounts/a%2F1"))
-			Expect(acct.State).To(Equal(billing.AccountInactive))
+			Expect(path).To(Equal("/api/v1/external/accounts/a%2F1"))
 			Expect(acct.RawStatus).To(Equal("Inactive"))
+			Expect(acct.ApprovalStatus).To(Equal("Approved"))
+			Expect(acct.State).To(Equal(billing.AccountUnknown))
 		})
 
 		It("tells a missing account (NOT_FOUND) apart from other failures", func() {
@@ -179,7 +214,7 @@ var _ = Describe("M360 accounts", func() {
 
 		It("reports the correlation value as present when ExternalId is set", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Id":"a1","ExternalId":"ext-1","Status":"Active"}`))
+				_, _ = w.Write([]byte(dataBody(`{"Id":"a1","ExternalId":"ext-1"}`)))
 			})
 			v, ok, err := adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
 			Expect(err).ToNot(HaveOccurred())
@@ -188,7 +223,7 @@ var _ = Describe("M360 accounts", func() {
 		})
 
 		It("reports the correlation value as absent when ExternalId is missing", func() {
-			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Id":"a1","Status":"Active"}`)) })
+			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(dataBody(`{"Id":"a1"}`))) })
 			v, ok, err := adapter.CorrelationValue(context.Background(), billing.NewAccountRef("a1"))
 			Expect(err).ToNot(HaveOccurred())
 			Expect(ok).To(BeFalse())
@@ -202,23 +237,6 @@ var _ = Describe("M360 accounts", func() {
 		})
 	})
 
-	DescribeTable("normalizes provider status to a closed state set",
-		func(raw string, want billing.AccountState) {
-			build(func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"Id":"a1","Status":"` + raw + `"}`))
-			})
-			acct, err := adapter.GetAccount(context.Background(), billing.NewAccountRef("a1"))
-			Expect(err).ToNot(HaveOccurred())
-			Expect(acct.State).To(Equal(want))
-			Expect(acct.RawStatus).To(Equal(raw))
-		},
-		Entry("Active", "Active", billing.AccountActive),
-		Entry("case-insensitive", "ACTIVE", billing.AccountActive),
-		Entry("Inactive", "Inactive", billing.AccountInactive),
-		Entry("anything else", "Suspended", billing.AccountUnknown),
-		Entry("empty", "", billing.AccountUnknown),
-	)
-
 	Describe("correlation write", func() {
 		It("is unsupported and never contacts the provider", func() {
 			build(func(http.ResponseWriter, *http.Request) {})
@@ -231,9 +249,9 @@ var _ = Describe("M360 accounts", func() {
 
 	Describe("HealthCheck", func() {
 		It("succeeds when the account API answers", func() {
-			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"Items":[]}`)) })
+			build(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(listBody(0, true, `[]`))) })
 			Expect(adapter.HealthCheck(context.Background())).To(Succeed())
-			Expect((<-queries).Get("pageSize")).To(Equal("1"))
+			Expect((<-queries).Get("size")).To(Equal("1"))
 		})
 
 		It("fails when the account API rejects the credential", func() {
