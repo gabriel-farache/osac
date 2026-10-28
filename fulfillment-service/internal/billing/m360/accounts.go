@@ -17,49 +17,45 @@ import (
 	"context"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/billing"
 )
 
-const (
-	maxPageSize        = 20
-	healthCheckTimeout = 3 * time.Second
-)
+const healthCheckTimeout = 3 * time.Second
 
 // M360 wire shapes for accounts live here so a change in the provider contract touches one place.
 type account struct {
-	ID             string `json:"Id"`
-	Name           string `json:"Name"`
-	ExternalID     string `json:"ExternalId"`
-	Status         string `json:"Status"`
-	ApprovalStatus string `json:"ApprovalStatus"`
+	ID                string     `json:"Id"`
+	Name              string     `json:"Name"`
+	ExternalID        string     `json:"ExternalId"`
+	StatusRef         *statusRef `json:"Status__r"`
+	ApprovalStatusRef *statusRef `json:"ApprovalStatus__r"`
 }
 
-type accountList struct {
-	Items    []account `json:"Items"`
-	NextPage string    `json:"NextPage"`
+// statusRef is the readable side of Status and ApprovalStatus, whose own values are UUIDs or null.
+type statusRef struct {
+	Name string `json:"Name"`
+}
+
+func (r *statusRef) name() string {
+	if r == nil {
+		return ""
+	}
+	return r.Name
 }
 
 func (a account) normalize(op string) (billing.Account, error) {
 	if a.ID == "" {
 		return billing.Account{}, &billing.Error{Reason: billing.ReasonMalformed, Op: op}
 	}
-	state := billing.AccountUnknown
-	switch {
-	case strings.EqualFold(a.Status, "Active"):
-		state = billing.AccountActive
-	case strings.EqualFold(a.Status, "Inactive"):
-		state = billing.AccountInactive
-	}
 	return billing.Account{
 		Ref:            billing.NewAccountRef(a.ID),
 		Name:           a.Name,
 		ExternalID:     a.ExternalID,
-		State:          state,
-		RawStatus:      a.Status,
-		ApprovalStatus: a.ApprovalStatus,
+		State:          billing.AccountUnknown, // the status mapping rule is an open design point
+		RawStatus:      a.StatusRef.name(),
+		ApprovalStatus: a.ApprovalStatusRef.name(),
 	}, nil
 }
 
@@ -69,7 +65,7 @@ func (a *adapter) ListAccounts(ctx context.Context, filter billing.AccountFilter
 	if size <= 0 || size > maxPageSize {
 		size = maxPageSize
 	}
-	query := url.Values{"pageSize": {strconv.Itoa(size)}}
+	query := url.Values{"size": {strconv.Itoa(size)}}
 	if page.Token != "" {
 		query.Set("page", page.Token)
 	}
@@ -81,12 +77,12 @@ func (a *adapter) ListAccounts(ctx context.Context, filter billing.AccountFilter
 	case filter.Name != "":
 		query.Set("q", filter.Name)
 	}
-	var list accountList
-	if err := a.client.getDiscovery(ctx, op, "/accounts", query, &list); err != nil {
+	var resp envelope[pageData[account]]
+	if err := a.client.getDiscovery(ctx, op, "/accounts", query, &resp); err != nil {
 		return billing.AccountPage{}, err
 	}
-	result := billing.AccountPage{Accounts: make([]billing.Account, 0, len(list.Items)), Next: list.NextPage}
-	for _, item := range list.Items {
+	result := billing.AccountPage{Accounts: make([]billing.Account, 0, len(resp.Data.Content)), Next: resp.Data.next()}
+	for _, item := range resp.Data.Content {
 		acct, err := item.normalize(op)
 		if err != nil {
 			return billing.AccountPage{}, err
@@ -101,11 +97,11 @@ func (a *adapter) ListAccounts(ctx context.Context, filter billing.AccountFilter
 
 func (a *adapter) GetAccount(ctx context.Context, ref billing.AccountRef) (billing.Account, error) {
 	const op = "GetAccount"
-	var raw account
-	if err := a.client.getDiscovery(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &raw); err != nil {
+	var resp envelope[account]
+	if err := a.client.getDiscovery(ctx, op, "/accounts/"+url.PathEscape(ref.ID()), nil, &resp); err != nil {
 		return billing.Account{}, notFoundOn404(op, err)
 	}
-	return raw.normalize(op)
+	return resp.Data.normalize(op)
 }
 
 func (a *adapter) CorrelationValue(ctx context.Context, ref billing.AccountRef) (string, bool, error) {
@@ -126,6 +122,6 @@ func (a *adapter) SetCorrelationValue(context.Context, billing.AccountRef, strin
 func (a *adapter) HealthCheck(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, healthCheckTimeout)
 	defer cancel()
-	query := url.Values{"pageSize": {"1"}}
+	query := url.Values{"size": {"1"}}
 	return a.client.getDiscovery(ctx, "HealthCheck", "/accounts", query, nil)
 }

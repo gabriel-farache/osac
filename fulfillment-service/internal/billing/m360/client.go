@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,10 @@ const (
 	breakerThreshold   = 5
 	breakerCooldown    = 30 * time.Second
 	defaultAttemptTime = 10 * time.Second
+
+	maxPageSize = 20 // the largest size M360 honours
+	// maxPages bounds pagination so a provider that never reports a last page cannot loop forever.
+	maxPages = 50
 )
 
 // client issues GET requests only. Response bodies are decoded or discarded, never logged or put in errors.
@@ -48,8 +53,9 @@ type client struct {
 
 func newClient(cfg billing.Config, logger *slog.Logger) *client {
 	return &client{
-		cfg:            cfg,
-		http:           &http.Client{},
+		cfg: cfg,
+		// A redirect would carry the bearer token to wherever the provider points; surface it as a failure instead.
+		http:           &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		logger:         logger,
 		breaker:        newBreaker(breakerThreshold, breakerCooldown),
 		attemptTimeout: defaultAttemptTime,
@@ -103,7 +109,7 @@ func (c *client) attempt(ctx context.Context, op, path string, query url.Values,
 	ctx, cancel := context.WithTimeout(ctx, c.attemptTimeout)
 	defer cancel()
 
-	u := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/api/" + c.cfg.APIVersion + path
+	u := strings.TrimSuffix(c.cfg.BaseURL, "/") + "/api/" + c.cfg.APIVersion + "/external" + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -130,16 +136,71 @@ func (c *client) attempt(ctx context.Context, op, path string, query url.Values,
 	if err != nil {
 		return billing.NewError(billing.ReasonUnavailable, op, true, resp.StatusCode)
 	}
-	var envelope struct {
+	var probe struct {
 		Error json.RawMessage `json:"error"`
 	}
-	if json.Unmarshal(body, &envelope) != nil || envelope.Error != nil {
+	if json.Unmarshal(body, &probe) != nil || probe.Error != nil {
 		return billing.NewError(billing.ReasonMalformed, op, false, resp.StatusCode)
 	}
-	if out != nil && json.Unmarshal(body, out) != nil {
+	if out == nil {
+		return nil
+	}
+	if json.Unmarshal(body, out) != nil {
+		return billing.NewError(billing.ReasonMalformed, op, false, resp.StatusCode)
+	}
+	if v, ok := out.(interface{ valid() bool }); ok && !v.valid() {
 		return billing.NewError(billing.ReasonMalformed, op, false, resp.StatusCode)
 	}
 	return nil
+}
+
+// envelope is M360's ApiResponse wrapper. Data is a pointer so a null or missing payload is detectable.
+type envelope[T any] struct {
+	Success bool              `json:"success"`
+	Errors  []json.RawMessage `json:"errors"`
+	Data    *T                `json:"data"`
+}
+
+// valid is false for a 2xx the provider reports as failed or that carries no data, so it never reads as empty.
+func (e *envelope[T]) valid() bool { return e.Success && len(e.Errors) == 0 && e.Data != nil }
+
+// pageData is the zero-based page inside an envelope.
+type pageData[T any] struct {
+	Content []T  `json:"content"`
+	Number  int  `json:"number"`
+	Last    bool `json:"last"`
+}
+
+// next is the token of the following page, empty on the last one.
+func (p pageData[T]) next() string {
+	if p.Last {
+		return ""
+	}
+	return strconv.Itoa(p.Number + 1)
+}
+
+// getAllPages reads every page of a pricing collection, adding extra to each request.
+func getAllPages[T any](ctx context.Context, c *client, op, path string, extra url.Values) ([]T, error) {
+	var all []T
+	token := ""
+	for range maxPages {
+		query := url.Values{"size": {strconv.Itoa(maxPageSize)}}
+		for k, v := range extra {
+			query[k] = v
+		}
+		if token != "" {
+			query.Set("page", token)
+		}
+		var resp envelope[pageData[T]]
+		if err := c.get(ctx, op, path, query, &resp); err != nil {
+			return nil, err
+		}
+		all = append(all, resp.Data.Content...)
+		if token = resp.Data.next(); token == "" {
+			return all, nil
+		}
+	}
+	return nil, &billing.Error{Reason: billing.ReasonMalformed, Op: op}
 }
 
 // isNotFound reports whether err carries a provider 404.

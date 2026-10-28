@@ -53,7 +53,8 @@ const (
 )
 
 // Account keeps the raw provider status values next to the normalized state. Its correlation value is
-// ExternalID, which must never reach logs or formatted output.
+// ExternalID, which must never reach logs or formatted output. Adapters leave State UNKNOWN until the status
+// mapping rule is defined.
 type Account struct {
 	opaque
 	Ref            AccountRef
@@ -82,10 +83,24 @@ type AccountPage struct {
 	Next     string
 }
 
+// PriceableAttribute is a provider charge dimension. Rate rows reference it by ID.
+type PriceableAttribute struct {
+	ID   string
+	Name string
+}
+
+type AttributeValue struct {
+	Name  string
+	Value string
+}
+
+// RateRow is one row of a rate card as the provider sent it. PriceMethod is the provider's raw value: callers
+// decide which methods they support.
 type RateRow struct {
-	Dimension string
-	Amount    string // decimal exactly as received from the provider
-	Unit      string // empty when the provider advertises none
+	DimensionID     string // ID of the PriceableAttribute the row prices
+	PriceMethod     string
+	UnitRate        string // decimal text exactly as received; empty when the provider sends none
+	AttributeValues []AttributeValue
 }
 
 type RateCard struct {

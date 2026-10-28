@@ -100,7 +100,8 @@ var _ = Describe("Adapter contract", func() {
 
 	providers := []provider{
 		{
-			name: "M360",
+			name:      "M360",
+			rawStatus: "Active",
 			build: func() billing.Adapter {
 				var a billing.Adapter
 				m360Fake, a = seededM360()
@@ -157,7 +158,7 @@ var _ = Describe("Adapter contract", func() {
 				Expect(err).ToNot(HaveOccurred())
 				attrs, err := adapter.ListPriceableAttributes(ctx, svc)
 				Expect(err).ToNot(HaveOccurred())
-				Expect(attrs).To(Equal([]string{"gpu_hours"}))
+				Expect(attrs).To(Equal([]billing.PriceableAttribute{{ID: "dim-1", Name: "gpu_hours"}}))
 				card, err := adapter.GetServiceRateCard(ctx, svc, "USD")
 				Expect(err).ToNot(HaveOccurred())
 				Expect(card).To(Equal(billing.RateCard{Currency: "USD",

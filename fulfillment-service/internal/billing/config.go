@@ -13,7 +13,11 @@ language governing permissions and limitations under the License.
 
 package billing
 
-import "strings"
+import (
+	"net"
+	"net/url"
+	"strings"
+)
 
 // Config is the provider connection settings, built by LoadConfig or supplied directly by the caller. Embedding
 // opaque keeps the credential out of logs and formatted output.
@@ -24,12 +28,27 @@ type Config struct {
 	Credential string
 }
 
-// Validate fails with a NOT_CONFIGURED *Error when the configuration is incomplete.
+// Validate fails with a NOT_CONFIGURED *Error when the configuration is incomplete or the base URL would send the
+// credential in cleartext: it needs a host and the https scheme, except that http is accepted for loopback hosts.
 func (c Config) Validate() error {
-	if c.BaseURL == "" || c.APIVersion == "" || c.Credential == "" {
+	if c.APIVersion == "" || c.Credential == "" || !validBaseURL(c.BaseURL) {
 		return &Error{Reason: ReasonNotConfigured, Op: "configure"}
 	}
 	return nil
+}
+
+func validBaseURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	switch u.Scheme {
+	case "https":
+		return true
+	case "http":
+		return u.Hostname() == "localhost" || net.ParseIP(u.Hostname()).IsLoopback()
+	}
+	return false
 }
 
 // LoadConfig builds a Config from the deployment: OSAC_BILLING_PROVIDER, OSAC_BILLING_BASE_URL,
