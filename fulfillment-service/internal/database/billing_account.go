@@ -153,6 +153,8 @@ var billingAccountColumns = map[string]string{
 // generic Metadata/Spec/Status object shape, which billing_accounts deliberately does not use.
 var filterClausePattern = regexp.MustCompile(`^this\.([a-z_]+) == "([^"]*)"$`)
 
+// billingAccountFilterSQL translates a filter expression into a SQL WHERE clause and its args, using
+// filterClausePattern and billingAccountColumns. Returns "", nil, nil for an empty filter.
 func billingAccountFilterSQL(filter string) (sql string, args []any, err error) {
 	if filter == "" {
 		return "", nil, nil
@@ -181,6 +183,8 @@ func billingAccountFilterSQL(filter string) (sql string, args []any, err error) 
 // filter translator above if a future story needs multi-field ordering on a flat table.
 var orderPattern = regexp.MustCompile(`^([a-z_]+)(?: (asc|desc))?$`)
 
+// billingAccountOrderSQL translates an order expression into a SQL ORDER BY column (with optional
+// asc/desc), defaulting to "id" for an empty order.
 func billingAccountOrderSQL(order string) (sql string, err error) {
 	if order == "" {
 		return "id", nil

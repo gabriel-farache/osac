@@ -55,6 +55,7 @@ type runnerContext struct {
 	format string
 }
 
+// run validates the output format, connects using the configured login, and renders the listed billing accounts.
 func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	if c.format != formatTable && c.format != formatJson && c.format != formatYaml {
@@ -78,6 +79,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	return render(ctx, terminal.ConsoleFromContext(ctx), c.format, response)
 }
 
+// render writes response as a table, JSON, or YAML depending on format.
 func render(ctx context.Context, console *terminal.Console, format string,
 	response *publicv1.BillingAccountsListResponse) error {
 	if format == formatTable {
@@ -126,6 +128,7 @@ func renderTable(ctx context.Context, console *terminal.Console, items []*public
 	writer.Flush()
 }
 
+// orDash returns value, or "-" when it is empty.
 func orDash(value string) string {
 	if value == "" {
 		return "-"

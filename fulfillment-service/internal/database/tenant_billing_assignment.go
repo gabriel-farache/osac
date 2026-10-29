@@ -166,6 +166,9 @@ var tenantBillingAssignmentEqualityPattern = regexp.MustCompile(`^this\.(spec|st
 // `!has(this.status.effective_to)` (current only).
 var tenantBillingAssignmentHasPattern = regexp.MustCompile(`^(!?)has\(this\.status\.effective_to\)$`)
 
+// tenantBillingAssignmentFilterSQL translates a filter expression into a SQL WHERE clause and its args, handling
+// both equality clauses and the has(this.status.effective_to) presence check. Returns "", nil, nil for an empty
+// filter.
 func tenantBillingAssignmentFilterSQL(filter string) (sql string, args []any, err error) {
 	if filter == "" {
 		return "", nil, nil
@@ -199,6 +202,8 @@ func tenantBillingAssignmentFilterSQL(filter string) (sql string, args []any, er
 
 var tenantBillingAssignmentOrderPattern = regexp.MustCompile(`^([a-z_]+)(?: (asc|desc))?$`)
 
+// tenantBillingAssignmentOrderSQL translates an order expression into a SQL ORDER BY column (with optional
+// asc/desc), defaulting to "effective_from desc" for an empty order.
 func tenantBillingAssignmentOrderSQL(order string) (string, error) {
 	if order == "" {
 		return "effective_from desc", nil

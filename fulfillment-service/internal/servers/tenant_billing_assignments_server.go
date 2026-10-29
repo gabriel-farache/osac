@@ -59,6 +59,8 @@ func (b *TenantBillingAssignmentsServerBuilder) SetDelegate(
 	return b
 }
 
+// Build validates that SetLogger and SetDelegate were both called, builds the public/private mappers, and
+// returns the configured server.
 func (b *TenantBillingAssignmentsServerBuilder) Build() (result *TenantBillingAssignmentsServer, err error) {
 	if b.logger == nil {
 		err = errors.New("logger is mandatory")
@@ -88,6 +90,7 @@ func (b *TenantBillingAssignmentsServerBuilder) Build() (result *TenantBillingAs
 	return
 }
 
+// toPublic maps a private tenant billing assignment to its public proto form.
 func (s *TenantBillingAssignmentsServer) toPublic(ctx context.Context, in *privatev1.TenantBillingAssignment) (
 	*publicv1.TenantBillingAssignment, error) {
 	out := &publicv1.TenantBillingAssignment{}
@@ -98,6 +101,7 @@ func (s *TenantBillingAssignmentsServer) toPublic(ctx context.Context, in *priva
 	return out, nil
 }
 
+// toPrivate maps a public tenant billing assignment to its private proto form.
 func (s *TenantBillingAssignmentsServer) toPrivate(ctx context.Context, in *publicv1.TenantBillingAssignment) (
 	*privatev1.TenantBillingAssignment, error) {
 	out := &privatev1.TenantBillingAssignment{}
