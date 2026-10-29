@@ -36,6 +36,7 @@ type twoPageThenFailAdapter struct {
 	calls int
 }
 
+// ListAccounts returns one account on the first call and a 503 error on every call after that.
 func (a *twoPageThenFailAdapter) ListAccounts(_ context.Context, _ billing.AccountFilter, _ billing.Page) (
 	billing.AccountPage, error) {
 	a.calls++

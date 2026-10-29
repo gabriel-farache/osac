@@ -93,6 +93,7 @@ func (b *PrivateTenantBillingAssignmentsServerBuilder) SetProvider(
 	return b
 }
 
+// Build validates that SetLogger and SetProvider were both called and returns the configured server.
 func (b *PrivateTenantBillingAssignmentsServerBuilder) Build() (
 	result *PrivateTenantBillingAssignmentsServer, err error) {
 	if b.logger == nil {
@@ -334,6 +335,7 @@ func (s *PrivateTenantBillingAssignmentsServer) rejectIfAlreadyBound(
 	return s.rejectIfAccountAlreadyBound(ctx, tx, accountID)
 }
 
+// rejectIfAccountAlreadyBound fails with ACCOUNT_ALREADY_BOUND when accountID already has an active assignment.
 func (s *PrivateTenantBillingAssignmentsServer) rejectIfAccountAlreadyBound(
 	ctx context.Context, tx database.Tx, accountID string) error {
 	if _, err := database.GetActiveTenantBillingAssignmentByAccount(ctx, tx, accountID); err == nil {
@@ -346,6 +348,7 @@ func (s *PrivateTenantBillingAssignmentsServer) rejectIfAccountAlreadyBound(
 	return nil
 }
 
+// requireActiveBillingAccount fails with ACCOUNT_INACTIVE or ACCOUNT_STATE_UNKNOWN unless account.State is ACTIVE.
 func requireActiveBillingAccount(account database.BillingAccountForAssignment) error {
 	switch billing.AccountState(account.State) {
 	case billing.AccountActive:
@@ -453,6 +456,7 @@ func countTenantBillingAssignmentProviderMatches(ctx context.Context, adapter bi
 	return count, nil
 }
 
+// buildTenantBillingAssignmentsListResponse converts rows to their proto form and wraps them with the page total.
 func buildTenantBillingAssignmentsListResponse(
 	rows []database.TenantBillingAssignmentRow, total int32) *privatev1.TenantBillingAssignmentsListResponse {
 	items := make([]*privatev1.TenantBillingAssignment, 0, len(rows))
@@ -466,6 +470,7 @@ func buildTenantBillingAssignmentsListResponse(
 	}.Build()
 }
 
+// toTenantBillingAssignmentProto converts a database row into its private proto representation.
 func toTenantBillingAssignmentProto(row database.TenantBillingAssignmentRow) *privatev1.TenantBillingAssignment {
 	statusBuilder := privatev1.TenantBillingAssignmentStatus_builder{
 		ConnectionState: mapTenantBillingAssignmentConnectionState(row.ConnectionState),
@@ -489,6 +494,8 @@ func toTenantBillingAssignmentProto(row database.TenantBillingAssignmentRow) *pr
 	}.Build()
 }
 
+// mapTenantBillingAssignmentConnectionState maps a connection_state column value to its proto enum, returning
+// UNSPECIFIED for anything else.
 func mapTenantBillingAssignmentConnectionState(state string) privatev1.TenantBillingAssignmentConnectionState {
 	switch state {
 	case tbaStatePending:

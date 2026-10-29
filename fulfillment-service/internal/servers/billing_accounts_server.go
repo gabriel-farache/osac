@@ -57,6 +57,7 @@ func (b *BillingAccountsServerBuilder) SetDelegate(value *PrivateBillingAccounts
 	return b
 }
 
+// Build validates that SetLogger and SetDelegate were both called and returns the configured server.
 func (b *BillingAccountsServerBuilder) Build() (result *BillingAccountsServer, err error) {
 	if b.logger == nil {
 		err = errors.New("logger is mandatory")

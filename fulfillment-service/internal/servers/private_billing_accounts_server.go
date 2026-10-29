@@ -73,6 +73,7 @@ func (b *PrivateBillingAccountsServerBuilder) SetProvider(
 	return b
 }
 
+// Build validates that SetLogger and SetProvider were both called and returns the configured server.
 func (b *PrivateBillingAccountsServerBuilder) Build() (result *PrivateBillingAccountsServer, err error) {
 	if b.logger == nil {
 		err = errors.New("logger is mandatory")
@@ -158,6 +159,8 @@ func toPrivateBillingAccount(row database.BillingAccountRow) *privatev1.BillingA
 	}.Build()
 }
 
+// mapBillingAccountState maps a billing_accounts.state column value to its proto enum, returning UNKNOWN for
+// anything else.
 func mapBillingAccountState(state string) privatev1.BillingAccountState {
 	switch billing.AccountState(state) {
 	case billing.AccountActive:
