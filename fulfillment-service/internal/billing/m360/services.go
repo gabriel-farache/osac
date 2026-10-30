@@ -82,6 +82,9 @@ func (a *adapter) ListPriceableAttributes(ctx context.Context, svc billing.Servi
 	}
 	attrs := make([]billing.PriceableAttribute, 0, len(items))
 	for _, item := range items {
+		if item.ID == "" {
+			return nil, &billing.Error{Reason: billing.ReasonMalformed, Op: op}
+		}
 		attrs = append(attrs, billing.PriceableAttribute{ID: item.ID, Name: item.Name})
 	}
 	return attrs, nil
@@ -109,7 +112,7 @@ func (a *adapter) GetServiceRateCard(ctx context.Context, svc billing.ServiceRef
 	}
 	card := billing.RateCard{Currency: currency, Rows: make([]billing.RateRow, 0, len(raw.Rows))}
 	for _, row := range raw.Rows {
-		if row.PriceMethod == "" {
+		if row.PriceDimID == "" || row.PriceMethod == "" {
 			return billing.RateCard{}, &billing.Error{Reason: billing.ReasonMalformed, Op: op}
 		}
 		out := billing.RateRow{DimensionID: row.PriceDimID, PriceMethod: row.PriceMethod, UnitRate: row.UnitRate.String()}
