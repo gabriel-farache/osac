@@ -24,7 +24,9 @@ import (
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/controllers/finalizers"
+	"github.com/osac-project/osac/fulfillment-service/internal/database"
 	"github.com/osac-project/osac/fulfillment-service/internal/database/dao"
+	"github.com/osac-project/osac/fulfillment-service/internal/uuid"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 )
 
@@ -526,6 +528,75 @@ var _ = Describe("Private tenants server (Tenant API)", func() {
 			Id: tenant.GetId(),
 		}.Build())
 		Expect(err).ToNot(HaveOccurred())
+	})
+
+	It("Deletes a tenant that has a billing assignment without rejecting the delete or "+
+		"cascade-deleting the assignment (OSAC-6886)", func() {
+		// Create a tenant with no finalizers, so deletion is attempted immediately once its
+		// default project is gone (same shape as "Can delete a tenant after deleting all
+		// projects" above).
+		createTenantResponse, err := tenantsServer.Create(ctx, privatev1.TenantsCreateRequest_builder{
+			Object: privatev1.Tenant_builder{
+				Metadata: privatev1.Metadata_builder{
+					Name: "billed-tenant",
+				}.Build(),
+			}.Build(),
+		}.Build())
+		Expect(err).ToNot(HaveOccurred())
+		tenant := createTenantResponse.GetObject()
+
+		listProjectsResponse, err := projectsServer.List(ctx, privatev1.ProjectsListRequest_builder{
+			Filter: new("this.metadata.tenant == 'billed-tenant'"),
+		}.Build())
+		Expect(err).ToNot(HaveOccurred())
+		for _, project := range listProjectsResponse.GetItems() {
+			_, err = projectsServer.Delete(ctx, privatev1.ProjectsDeleteRequest_builder{
+				Id: project.GetId(),
+			}.Build())
+			Expect(err).ToNot(HaveOccurred())
+		}
+
+		// Give the tenant a billing assignment, including a closed (historical) interval, so
+		// both the current and a past row reference it.
+		tx, err := database.TxFromContext(ctx)
+		Expect(err).ToNot(HaveOccurred())
+		account1, err := database.UpsertBillingAccount(ctx, tx, database.BillingAccountUpsert{
+			ID: uuid.New(), ProviderKey: "m360", ProviderAccountReference: uuid.New(), State: "ACTIVE",
+		})
+		Expect(err).ToNot(HaveOccurred())
+		account2, err := database.UpsertBillingAccount(ctx, tx, database.BillingAccountUpsert{
+			ID: uuid.New(), ProviderKey: "m360", ProviderAccountReference: uuid.New(), State: "ACTIVE",
+		})
+		Expect(err).ToNot(HaveOccurred())
+		firstAssignment, err := database.CloseAndInsertTenantBillingAssignment(ctx, tx, "",
+			database.TenantBillingAssignmentInsert{
+				ID: uuid.New(), Name: "billed-tenant-account-1", TenantID: "billed-tenant",
+				BillingAccountID: account1, ConnectionState: "CONNECTED",
+			})
+		Expect(err).ToNot(HaveOccurred())
+		currentAssignment, err := database.CloseAndInsertTenantBillingAssignment(ctx, tx, firstAssignment,
+			database.TenantBillingAssignmentInsert{
+				ID: uuid.New(), Name: "billed-tenant-account-2", TenantID: "billed-tenant",
+				BillingAccountID: account2, ConnectionState: "CONNECTED",
+			})
+		Expect(err).ToNot(HaveOccurred())
+
+		// Delete the tenant: it must proceed, not be rejected because an assignment
+		// references it.
+		_, err = tenantsServer.Delete(ctx, privatev1.TenantsDeleteRequest_builder{
+			Id: tenant.GetId(),
+		}.Build())
+		Expect(err).ToNot(HaveOccurred())
+
+		// Neither the closed nor the current assignment row was cascade-deleted; history
+		// stays intact as a tombstone.
+		closedRow, err := database.GetTenantBillingAssignment(ctx, tx, firstAssignment)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(closedRow.TenantID).To(Equal("billed-tenant"))
+		Expect(closedRow.EffectiveTo).ToNot(BeNil())
+		currentRow, err := database.GetTenantBillingAssignment(ctx, tx, currentAssignment)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(currentRow.TenantID).To(Equal("billed-tenant"))
 	})
 
 })
