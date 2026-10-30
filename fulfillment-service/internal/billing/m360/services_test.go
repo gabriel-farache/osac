@@ -203,6 +203,15 @@ var _ = Describe("M360 services", func() {
 			Expect(attrs).To(BeNil())
 		})
 
+		It("rejects an attribute without an id", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(listBody(0, true, `[{"id":"d1","name":"gpu_hours"},{"id":"","name":"storage_gb"}]`)))
+			})
+			attrs, err := adapter.ListPriceableAttributes(context.Background(), billing.NewServiceRef("s"))
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
+			Expect(attrs).To(BeNil())
+		})
+
 		It("surfaces provider failure instead of an empty list", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(403) })
 			attrs, err := adapter.ListPriceableAttributes(context.Background(), billing.NewServiceRef("s"))
@@ -252,6 +261,16 @@ var _ = Describe("M360 services", func() {
 		It("rejects a row without a price method", func() {
 			build(func(w http.ResponseWriter, _ *http.Request) {
 				_, _ = w.Write([]byte(`{"currency":"USD","rows":[{"priceDimId":"d1","unitRate":1}]}`))
+			})
+			_, err := adapter.GetServiceRateCard(context.Background(), billing.NewServiceRef("s1"), "USD")
+			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
+		})
+
+		It("rejects a row without a price dimension id", func() {
+			build(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(`{"currency":"USD","rows":[
+					{"priceDimId":"d1","priceMethod":"QUANTITY","unitRate":1},
+					{"priceMethod":"TIERED"}]}`))
 			})
 			_, err := adapter.GetServiceRateCard(context.Background(), billing.NewServiceRef("s1"), "USD")
 			Expect(reasonOf(err)).To(Equal(billing.ReasonMalformed))
