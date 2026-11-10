@@ -28,9 +28,11 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/billingaccount"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/billingproviderstatus"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/externalippool"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/storagetier"
+	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/tenantbillingassignment"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/token"
 	"github.com/osac-project/osac/fulfillment-service/internal/config"
 	"github.com/osac-project/osac/fulfillment-service/internal/logging"
@@ -65,9 +67,11 @@ func Cmd() *cobra.Command {
 		RunE:                  runner.run,
 		ValidArgsFunction:     completeObjectTypes,
 	}
+	result.AddCommand(billingaccount.Cmd())
 	result.AddCommand(billingproviderstatus.Cmd())
 	result.AddCommand(externalippool.Cmd())
 	result.AddCommand(storagetier.Cmd())
+	result.AddCommand(tenantbillingassignment.Cmd())
 	result.AddCommand(token.Cmd())
 	flags := result.Flags()
 	flags.StringVarP(
@@ -156,7 +160,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 
 	// Check that the object type has been specified:
 	if len(args) == 0 {
-		c.console.Render(ctx, "no_object.txt", map[string]any{
+		_ = c.console.Render(ctx, "no_object.txt", map[string]any{
 			"Helper": c.globalHelper,
 		})
 		return nil
@@ -165,7 +169,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	// Get the object helper:
 	c.objectHelper = c.globalHelper.Lookup(args[0])
 	if c.objectHelper == nil {
-		c.console.Render(ctx, "wrong_object.txt", map[string]any{
+		_ = c.console.Render(ctx, "wrong_object.txt", map[string]any{
 			"Helper": c.globalHelper,
 			"Object": args[0],
 		})
@@ -276,7 +280,7 @@ func (c *runnerContext) list(ctx context.Context, keys []string) (results []prot
 func (c *runnerContext) renderTable(ctx context.Context, objects []proto.Message) error {
 	// Check if there are results:
 	if len(objects) == 0 {
-		c.console.Render(ctx, "no_matching_objects.txt", nil)
+		_ = c.console.Render(ctx, "no_matching_objects.txt", nil)
 		return nil
 	}
 
@@ -300,9 +304,9 @@ func (c *runnerContext) renderJson(ctx context.Context, objects []proto.Message)
 		return err
 	}
 	if len(values) == 1 {
-		c.console.RenderJson(ctx, values[0])
+		_ = c.console.RenderJson(ctx, values[0])
 	} else {
-		c.console.RenderJson(ctx, values)
+		_ = c.console.RenderJson(ctx, values)
 	}
 	return nil
 }
@@ -313,9 +317,9 @@ func (c *runnerContext) renderYaml(ctx context.Context, objects []proto.Message)
 		return err
 	}
 	if len(values) == 1 {
-		c.console.RenderYaml(ctx, values[0])
+		_ = c.console.RenderYaml(ctx, values[0])
 	} else {
-		c.console.RenderYaml(ctx, values)
+		_ = c.console.RenderYaml(ctx, values)
 	}
 	return nil
 }
