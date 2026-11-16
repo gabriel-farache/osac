@@ -272,8 +272,9 @@ type ProviderRateCardItemsListRequest_builder struct {
 	Filter *string
 	// Sort order. Accepted but not yet implemented, as with other list requests.
 	Order *string
-	// Reserved for tenant-to-account assignment support in OSAC-6871. Any nonempty value currently returns
-	// UNIMPLEMENTED; OSAC tenant identifiers are never treated as provider account correlation values.
+	// Optional tenant name. Requires a live tenant with a current CONNECTED billing assignment and an ACTIVE linked
+	// account, then returns provider-global rates. Omitted or empty selects global mode; whitespace is not empty.
+	// Tenant names are never used as provider account references or external billing account identifiers.
 	TenantId *string
 	// OSAC service name; matched to the provider service of the same name. Omit to list compute_instance and
 	// cluster. An unknown service returns no rows.

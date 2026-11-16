@@ -172,28 +172,28 @@ var _ = Describe("Billing pricing REST routes", Label("billing"), Serial, func()
 		Entry("still requires a currency", (*string)(nil), codes.InvalidArgument),
 	)
 
-	It("rejects a tenant-scoped provider rate card items REST request as not implemented", func(ctx context.Context) {
+	It("retains billing-not-configured for tenant-scoped provider rate card requests", func(ctx context.Context) {
 		_, err := publicv1.NewProviderRateCardItemsClient(tool.ExternalView().AdminConn()).List(ctx,
 			publicv1.ProviderRateCardItemsListRequest_builder{
 				CurrencyCode: new("USD"),
 				TenantId:     new("tenant-a"),
 			}.Build())
-		Expect(status.Code(err)).To(Equal(codes.Unimplemented), "the gRPC path sets the expectation")
-		Expect(err.Error()).To(ContainSubstring("tenant_id is not supported"))
+		Expect(status.Code(err)).To(Equal(codes.FailedPrecondition), "the gRPC path sets the expectation")
+		Expect(err.Error()).To(ContainSubstring("billing is not configured"))
 
 		By("reading the public REST route through the external ingress")
 		body, statusCode, err := getBillingPricingREST(ctx, tool.ExternalView().AdminClient(),
 			"/api/fulfillment/v1/billing/provider_rate_card_items?currency_code=USD&tenant_id=tenant-a")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(statusCode).To(Equal(http.StatusNotImplemented), "grpc-gateway maps UNIMPLEMENTED to 501")
-		Expect(string(body)).To(ContainSubstring("tenant_id is not supported"))
+		Expect(statusCode).To(Equal(http.StatusBadRequest))
+		Expect(string(body)).To(ContainSubstring("BILLING_NOT_CONFIGURED"))
 
 		By("reading the private REST route through the internal ingress")
 		body, statusCode, err = getBillingPricingREST(ctx, tool.InternalView().AdminClient(),
 			"/api/private/v1/billing/provider_rate_card_items?currency_code=USD&tenant_id=tenant-a")
 		Expect(err).NotTo(HaveOccurred())
-		Expect(statusCode).To(Equal(http.StatusNotImplemented), "grpc-gateway maps UNIMPLEMENTED to 501")
-		Expect(string(body)).To(ContainSubstring("tenant_id is not supported"))
+		Expect(statusCode).To(Equal(http.StatusBadRequest))
+		Expect(string(body)).To(ContainSubstring("BILLING_NOT_CONFIGURED"))
 	})
 })
 

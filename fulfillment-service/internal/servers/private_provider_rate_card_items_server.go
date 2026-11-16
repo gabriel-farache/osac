@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -200,12 +201,14 @@ func (b *PrivateProviderRateCardItemsServerBuilder) Build() (result *PrivateProv
 // List implements privatev1.ProviderRateCardItemsServer.
 func (s *PrivateProviderRateCardItemsServer) List(ctx context.Context,
 	request *privatev1.ProviderRateCardItemsListRequest) (*privatev1.ProviderRateCardItemsListResponse, error) {
-	if request.GetTenantId() != "" {
-		return nil, status.Error(codes.Unimplemented, "tenant_id is not supported until tenant-to-account assignments are available")
-	}
 	adapter, err := requireAdapter(s.provider)
 	if err != nil {
 		return nil, err
+	}
+	if tenantID := request.GetTenantId(); tenantID != "" {
+		if err := s.validateTenantContext(ctx, tenantID); err != nil {
+			return nil, err
+		}
 	}
 
 	currency := request.GetCurrencyCode()
@@ -294,6 +297,51 @@ func (s *PrivateProviderRateCardItemsServer) List(ctx context.Context,
 		Total: total,
 		Items: objects,
 	}.Build(), nil
+}
+
+func (s *PrivateProviderRateCardItemsServer) validateTenantContext(ctx context.Context, tenantID string) error {
+	if !auth.SubjectFromContext(ctx).Tenants.Contains(tenantID) {
+		return status.Error(codes.PermissionDenied, "tenant is outside the caller's scope")
+	}
+	// Eligibility is request-local, never cached with rates. Release the transaction before provider I/O.
+	_, err := database.WithNewTx(ctx, func(txCtx context.Context) (struct{}, error) {
+		tx, err := database.TxFromContext(txCtx)
+		if err != nil {
+			return struct{}{}, err
+		}
+		live, err := database.TenantLiveForAssignment(txCtx, tx, tenantID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		if !live {
+			return struct{}{}, billingFailure(codes.NotFound, "billing tenant not found", "BILLING_TENANT_NOT_FOUND")
+		}
+		assignment, err := database.GetActiveTenantBillingAssignmentByTenant(txCtx, tx, tenantID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return struct{}{}, failedPreconditionWithReason("BILLING_ASSIGNMENT_NOT_FOUND", "current billing assignment not found")
+		}
+		if err != nil {
+			return struct{}{}, err
+		}
+		if assignment.ConnectionState != tbaStateConnected {
+			return struct{}{}, failedPreconditionWithReason("BILLING_ASSIGNMENT_NOT_CONNECTED", "billing assignment is not connected")
+		}
+		account, err := database.GetBillingAccountForAssignment(txCtx, tx, assignment.BillingAccountID)
+		if err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, requireActiveBillingAccountState(billing.AccountState(account.State), account.ID)
+	})
+	if err != nil {
+		if ctx.Err() != nil {
+			return status.FromContextError(ctx.Err()).Err()
+		}
+		if _, ok := status.FromError(err); ok {
+			return err
+		}
+		return status.Error(codes.Internal, "failed to validate billing tenant context")
+	}
+	return nil
 }
 
 // sweepProviderRateCardCatalogInventory keeps all catalog item identities as well as the emitted pricing inputs:

@@ -573,6 +573,39 @@ Historical domain text on a retained tenant is not live ownership; later tombsto
 updates must not reserve those domains again. This domain-release timing is an
 approved lifecycle compatibility choice, not a new billing-retention requirement.
 
+#### Provider rate-card tenant selector
+
+`ProviderRateCardItems.List` remains admin-only on public/private gRPC and REST.
+Its optional `tenant_id` is a **tenant name**, not an account ID, provider-native
+reference or external billing account ID. Omitted or explicitly empty selects
+global mode; whitespace is a nonempty selector. A selected tenant must be in the
+trusted subject's scope, live, and have a current (`effective_to` unset)
+`CONNECTED` assignment with an `ACTIVE` linked account. Account eligibility uses
+the persisted last-observed state; this read does not refresh provider accounts
+or resolve correlation. Eligibility is checked on every request, including
+shared rate-cache hits, in a short transaction that ends before provider work.
+
+After eligibility, the same provider-global rates, service/CEL filters, and
+pagination apply. There is no account override tier. `currency_code` remains
+required and nonempty, passed unchanged: it is never inferred from the account.
+Invalid tenant context never falls back to global mode.
+
+Rejections carry a safe `google.rpc.ErrorInfo.reason`:
+
+- Unknown/deleted tenant: `NotFound/BILLING_TENANT_NOT_FOUND`.
+- No current assignment (including closed history only):
+  `FailedPrecondition/BILLING_ASSIGNMENT_NOT_FOUND`.
+- Current assignment not `CONNECTED`:
+  `FailedPrecondition/BILLING_ASSIGNMENT_NOT_CONNECTED`.
+- Linked account `INACTIVE`: `FailedPrecondition/ACCOUNT_INACTIVE`.
+- Linked account `UNKNOWN`: `FailedPrecondition/ACCOUNT_STATE_UNKNOWN`.
+
+Trusted-scope denial is `PermissionDenied` before store/provider access. The
+configured-provider guard remains `FailedPrecondition/BILLING_NOT_CONFIGURED`.
+Storage faults return generic `Internal` (or the request's cancellation/deadline
+status); provider faults retain classified, sanitized `Unavailable`. Responses
+never include provider-native identities or raw provider payloads.
+
 In general, services should not have any additional ad-hoc methods beyond those listed above. There
 are some existing exceptions, and the project will work to remove them over time.
 

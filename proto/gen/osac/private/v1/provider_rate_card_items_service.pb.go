@@ -48,8 +48,9 @@ type ProviderRateCardItemsListRequest struct {
 	Filter *string `protobuf:"bytes,3,opt,name=filter,proto3,oneof" json:"filter,omitempty"`
 	// Sort order. Accepted but not yet implemented, as with other list requests.
 	Order *string `protobuf:"bytes,4,opt,name=order,proto3,oneof" json:"order,omitempty"`
-	// Reserved for tenant-to-account assignment support in OSAC-6871. Any nonempty value currently returns
-	// UNIMPLEMENTED; OSAC tenant identifiers are never treated as provider account correlation values.
+	// Optional tenant name. Requires a live tenant with a current CONNECTED billing assignment and an ACTIVE linked
+	// account, then returns provider-global rates. Omitted or empty selects global mode; whitespace is not empty.
+	// Tenant names are never used as provider account references or external billing account identifiers.
 	TenantId *string `protobuf:"bytes,5,opt,name=tenant_id,json=tenantId,proto3,oneof" json:"tenant_id,omitempty"`
 	// OSAC service name; matched to the provider service of the same name. Omit to list compute_instance and
 	// cluster. An unknown service returns no rows.
@@ -251,8 +252,9 @@ type ProviderRateCardItemsListRequest_builder struct {
 	Filter *string
 	// Sort order. Accepted but not yet implemented, as with other list requests.
 	Order *string
-	// Reserved for tenant-to-account assignment support in OSAC-6871. Any nonempty value currently returns
-	// UNIMPLEMENTED; OSAC tenant identifiers are never treated as provider account correlation values.
+	// Optional tenant name. Requires a live tenant with a current CONNECTED billing assignment and an ACTIVE linked
+	// account, then returns provider-global rates. Omitted or empty selects global mode; whitespace is not empty.
+	// Tenant names are never used as provider account references or external billing account identifiers.
 	TenantId *string
 	// OSAC service name; matched to the provider service of the same name. Omit to list compute_instance and
 	// cluster. An unknown service returns no rows.

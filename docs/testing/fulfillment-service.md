@@ -98,6 +98,7 @@ identity E2E is [OSAC-6614](https://redhat.atlassian.net/browse/OSAC-6614).
   and private APIs. The configured-provider read paths use
   `internal/testing/billingstub` over HTTPS in the existing fulfillment CI
   leg. No real M360 provider is contacted.
+- Tenant-scoped provider rates ([DEV] [OSAC-7289](https://redhat.atlassian.net/browse/OSAC-7289)) require the real-PostgreSQL handler boundary plus Serial public/private gRPC and REST against the configured HTTPS stub; local doubles do not establish deployed routing or authorization.
 
 ## Coverage gaps
 

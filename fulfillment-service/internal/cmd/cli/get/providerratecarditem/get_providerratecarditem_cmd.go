@@ -234,8 +234,8 @@ const example = `  # List the rows of one service and currency
 
 const outputFlagHelp = `_FORMAT_ - Output format. Must be one of {{ bt }}table{{ bt }}, {{ bt }}json{{ bt }} or {{ bt }}yaml{{ bt }}.`
 
-const tenantIDFlagHelp = `_TENANT_ID_ - Limit rows to the billing account linked to this tenant. Not supported yet: the server rejects this
-filter until billing account assignment is implemented.`
+const tenantIDFlagHelp = `_TENANT_ID_ - Validate this tenant name has a current CONNECTED billing assignment and an ACTIVE linked account,
+then return provider-global rates. Omit or supply an empty value for global mode. No account-specific override rates.`
 
 const serviceFlagHelp = `_SERVICE_ - Limit rows to one OSAC service, such as {{ bt }}compute_instance{{ bt }}.`
 

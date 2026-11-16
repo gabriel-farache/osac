@@ -611,6 +611,8 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error { //nolint:
 		SetLogger(c.logger).
 		SetManager(txManager).
 		AddManagerOnlyMethods(
+			"/osac.public.v1.ProviderRateCardItems/List",
+			"/osac.private.v1.ProviderRateCardItems/List",
 			"/osac.public.v1.BillingAccounts/List",
 			"/osac.private.v1.BillingAccounts/List",
 			"/osac.public.v1.TenantBillingAssignments/Create",

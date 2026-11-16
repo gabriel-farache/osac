@@ -27,6 +27,13 @@ import (
 )
 
 var _ = Describe("render", func() {
+	It("documents the tenant eligibility gate without implying account-specific rates", func() {
+		usage := Cmd().Flags().Lookup("tenant-id").Usage
+		Expect(usage).To(ContainSubstring("tenant name"))
+		Expect(usage).To(ContainSubstring("CONNECTED"))
+		Expect(usage).To(ContainSubstring("global"))
+		Expect(usage).ToNot(ContainSubstring("Not supported yet"))
+	})
 	It("documents the count-only output in limit flag help", func() {
 		usage := Cmd().Flags().Lookup("limit").Usage
 		Expect(usage).To(ContainSubstring("TOTAL"))

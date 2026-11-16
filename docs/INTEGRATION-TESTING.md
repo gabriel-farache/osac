@@ -181,6 +181,8 @@ Read the [Release automation suite guide](testing/release-automation.md).
 ## fulfillment-service
 
 Read the [fulfillment-service suite guide](testing/fulfillment-service.md).
+Use its [coverage-selection map](testing/fulfillment-service.md#selecting-coverage)
+to identify required handler/database and deployed protocol boundaries.
 
 ## osac-installer
 

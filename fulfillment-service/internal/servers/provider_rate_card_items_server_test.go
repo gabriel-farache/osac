@@ -287,29 +287,6 @@ var _ = Describe("Provider rate card items server", func() {
 		Entry("negative limit", "", proto.Int32(-1)),
 	)
 
-	DescribeTable("rejects every nonempty tenant_id as unsupported before any provider call",
-		func(tenantID string, state billing.AccountState, configured bool) {
-			scenario := widgetScenario()
-			scenario.Accounts = []billingfake.AccountSpec{{ID: "acct-1", ExternalID: "tenant-a", State: state}}
-			fake := billingfake.New(scenario)
-			provider := fake.Provider()
-			if !configured {
-				provider = billing.NewProvider("", fake, nil)
-			}
-			server := build(provider, prometheus.NewRegistry())
-			_, err := server.List(ctx, publicv1.ProviderRateCardItemsListRequest_builder{
-				Service: proto.String("widget_service"), CurrencyCode: proto.String("USD"), TenantId: proto.String(tenantID),
-			}.Build())
-			Expect(status.Code(err)).To(Equal(codes.Unimplemented))
-			Expect(fake.Calls()).To(BeEmpty())
-		},
-		Entry("unknown tenant", "no-such-tenant", billing.AccountActive, true),
-		Entry("inactive provider account", "tenant-a", billing.AccountInactive, true),
-		Entry("active provider account", "tenant-a", billing.AccountActive, true),
-		Entry("whitespace is still nonempty", " ", billing.AccountUnknown, true),
-		Entry("billing disabled", "tenant-a", billing.AccountActive, false),
-	)
-
 	DescribeTable("lists every mapped service when service is omitted, independently of catalog inventory",
 		func(inventoryServices []string) {
 			scenario := billingfake.Scenario{}

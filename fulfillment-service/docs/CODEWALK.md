@@ -111,10 +111,12 @@ by the type system. A handler that panics is rolled back before the panic propag
 Use `Tx.OnCommit` for work that must only happen once a change is stored, such as logging it. It
 never runs after a rollback or a failed commit.
 
-**Provider-backed billing RPCs are an explicit exception.** Account discovery (`BillingAccounts.List`)
-and assignment writes/revalidation (`TenantBillingAssignments.Create`, `Update`, and private `Signal`)
-are configured with `TxInterceptorBuilder.AddManagerOnlyMethods`. The interceptor supplies the transaction
-manager but no ambient transaction; managed-service-account authorization and JIT provisioning use their
+**Provider-backed billing RPCs are an explicit exception.** Account discovery (`BillingAccounts.List`),
+assignment writes/revalidation (`TenantBillingAssignments.Create`, `Update`, and private `Signal`),
+and `ProviderRateCardItems.List` are configured with `TxInterceptorBuilder.AddManagerOnlyMethods`.
+Rate reads check tenant eligibility in a short transaction before using the provider-global rate cache/resolver.
+The interceptor supplies the transaction manager but no ambient transaction;
+managed-service-account authorization and JIT provisioning use their
 existing independent transaction paths. Billing handlers use short `database.WithNewTx` scopes, with no
 transaction or pooled connection held during provider I/O. Discovery fetches before its atomic store and
 opens its freshness window only after commit. Assignment operations commit expiring account/tenant/correlation
