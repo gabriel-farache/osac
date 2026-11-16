@@ -16,7 +16,6 @@ package get
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -24,13 +23,13 @@ import (
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/billingaccount"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/billingproviderstatus"
+	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/catalogpricinginput"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/externalippool"
+	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/providerratecarditem"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/storagetier"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/tenantbillingassignment"
 	"github.com/osac-project/osac/fulfillment-service/internal/cmd/cli/get/token"
@@ -45,20 +44,9 @@ import (
 //go:embed templates
 var templatesFS embed.FS
 
-// Possible output formats:
-const (
-	outputFormatTable = "table"
-	outputFormatJson  = "json"
-	outputFormatYaml  = "yaml"
-)
-
 // Cmd creates the `get` command with its object-type subcommands.
 func Cmd() *cobra.Command {
-	runner := &runnerContext{
-		marshalOptions: protojson.MarshalOptions{
-			UseProtoNames: true,
-		},
-	}
+	runner := &runnerContext{}
 	result := &cobra.Command{
 		Use:                   "get [FLAG...] OBJECT [ID|NAME]...",
 		DisableFlagsInUseLine: true,
@@ -69,7 +57,9 @@ func Cmd() *cobra.Command {
 	}
 	result.AddCommand(billingaccount.Cmd())
 	result.AddCommand(billingproviderstatus.Cmd())
+	result.AddCommand(catalogpricinginput.Cmd())
 	result.AddCommand(externalippool.Cmd())
+	result.AddCommand(providerratecarditem.Cmd())
 	result.AddCommand(storagetier.Cmd())
 	result.AddCommand(tenantbillingassignment.Cmd())
 	result.AddCommand(token.Cmd())
@@ -78,7 +68,7 @@ func Cmd() *cobra.Command {
 		&runner.args.format,
 		"output",
 		"o",
-		outputFormatTable,
+		rendering.Table,
 		outputFlagHelp,
 	)
 	flags.StringVar(
@@ -103,13 +93,12 @@ type runnerContext struct {
 		filter string
 		watch  bool
 	}
-	ctx            context.Context
-	logger         *slog.Logger
-	console        *terminal.Console
-	conn           *grpc.ClientConn
-	marshalOptions protojson.MarshalOptions
-	globalHelper   reflection.Helper
-	objectHelper   reflection.ObjectHelper
+	ctx          context.Context
+	logger       *slog.Logger
+	console      *terminal.Console
+	conn         *grpc.ClientConn
+	globalHelper reflection.Helper
+	objectHelper reflection.ObjectHelper
 }
 
 func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
@@ -177,11 +166,8 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check the flags:
-	if c.args.format != outputFormatTable && c.args.format != outputFormatJson && c.args.format != outputFormatYaml {
-		return fmt.Errorf(
-			"unknown output format '%s', should be '%s', '%s' or '%s'",
-			c.args.format, outputFormatTable, outputFormatJson, outputFormatYaml,
-		)
+	if err := rendering.ValidateFormat(c.args.format); err != nil {
+		return err
 	}
 
 	// If watch mode is enabled, watch for events instead of listing
@@ -199,9 +185,9 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	// Render the items:
 	var render func(context.Context, []proto.Message) error
 	switch c.args.format {
-	case outputFormatJson:
+	case rendering.JSON:
 		render = c.renderJson
-	case outputFormatYaml:
+	case rendering.YAML:
 		render = c.renderYaml
 	default:
 		render = c.renderTable
@@ -221,7 +207,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 // This can result in partial data for resources like secrets where the data field is redacted
 // when list is called and no names or identifiers are provided.
 func (c *runnerContext) fetchObjects(ctx context.Context, keys []string) ([]proto.Message, error) {
-	if len(keys) > 0 && c.args.format != outputFormatTable && c.objectHelper.UseGetForStructuredOutput() {
+	if len(keys) > 0 && c.args.format != rendering.Table && c.objectHelper.UseGetForStructuredOutput() {
 		return c.getByKeys(ctx, keys)
 	}
 	return c.list(ctx, keys)
@@ -299,7 +285,7 @@ func (c *runnerContext) renderTable(ctx context.Context, objects []proto.Message
 }
 
 func (c *runnerContext) renderJson(ctx context.Context, objects []proto.Message) error {
-	values, err := c.encodeObjects(objects)
+	values, err := rendering.EncodeListWithType(objects)
 	if err != nil {
 		return err
 	}
@@ -312,7 +298,7 @@ func (c *runnerContext) renderJson(ctx context.Context, objects []proto.Message)
 }
 
 func (c *runnerContext) renderYaml(ctx context.Context, objects []proto.Message) error {
-	values, err := c.encodeObjects(objects)
+	values, err := rendering.EncodeListWithType(objects)
 	if err != nil {
 		return err
 	}
@@ -322,32 +308,6 @@ func (c *runnerContext) renderYaml(ctx context.Context, objects []proto.Message)
 		c.console.RenderYaml(ctx, values)
 	}
 	return nil
-}
-
-func (c *runnerContext) encodeObjects(objects []proto.Message) (result []any, err error) {
-	values := make([]any, len(objects))
-	for i, object := range objects {
-		values[i], err = c.encodeObject(object)
-		if err != nil {
-			return
-		}
-	}
-	result = values
-	return
-}
-
-func (c *runnerContext) encodeObject(object proto.Message) (result any, err error) {
-	wrapper, err := anypb.New(object)
-	if err != nil {
-		return
-	}
-	var data []byte
-	data, err = c.marshalOptions.Marshal(wrapper)
-	if err != nil {
-		return
-	}
-	err = json.Unmarshal(data, &result)
-	return
 }
 
 func completeObjectTypes(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

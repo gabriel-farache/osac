@@ -17,8 +17,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2/dsl/core"
@@ -27,6 +25,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/osac-project/osac/fulfillment-service/internal/terminal"
+	"github.com/osac-project/osac/fulfillment-service/internal/testing"
 	publicv1 "github.com/osac-project/osac/proto/gen/osac/public/v1"
 )
 
@@ -36,7 +35,7 @@ type failingWriter struct {
 }
 
 // Write is the implementation of the io.Writer interface.
-func (w *failingWriter) Write(p []byte) (int, error) {
+func (w failingWriter) Write(p []byte) (int, error) {
 	return 0, w.err
 }
 
@@ -100,23 +99,61 @@ var _ = Describe("render", func() {
 		Expect(output).To(ContainSubstring("last_successful_check:"))
 	})
 
-	// Golden files live in testdata/. Regenerate with UPDATE_GOLDEN=1 and review the diff.
-	DescribeTable("matches the golden output",
-		func(format string, status func() *publicv1.BillingProviderStatus, name string) {
-			output := run(format, status())
-			path := filepath.Join("testdata", name)
-			if os.Getenv("UPDATE_GOLDEN") != "" {
-				Expect(os.WriteFile(path, []byte(output), 0o644)).To(Succeed())
-			}
-			expected, err := os.ReadFile(path)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(output).To(Equal(string(expected)))
+	DescribeTable("renders the expected output",
+		func(format string, status func() *publicv1.BillingProviderStatus, assert func(string)) {
+			assert(run(format, status()))
 		},
-		Entry("table, available", "table", available, "available.table.golden"),
-		Entry("table, not configured", "table", notConfigured, "not_configured.table.golden"),
-		Entry("json, available", "json", available, "available.json.golden"),
-		Entry("json, not configured", "json", notConfigured, "not_configured.json.golden"),
+		Entry("table, available", "table", available, func(output string) {
+			Expect(testing.TableRows(output)).To(Equal([][]string{
+				{"State:", "AVAILABLE"},
+				{"Provider:", "m360"},
+				{"Message:", "-"},
+				{"Capabilities:", "PRICING"},
+				{"Last successful check:", "2026-01-02T03:04:05Z"},
+				{"Usage delivery:", "UNKNOWN"},
+			}))
+		}),
+		Entry("table, not configured", "table", notConfigured, func(output string) {
+			Expect(testing.TableRows(output)).To(Equal([][]string{
+				{"State:", "NOT_CONFIGURED"},
+				{"Provider:", "-"},
+				{"Message:", "-"},
+				{"Capabilities:", "-"},
+				{"Last successful check:", "-"},
+				{"Usage delivery:", "UNKNOWN"},
+			}))
+		}),
+		Entry("json, available", "json", available, func(output string) {
+			Expect(output).To(MatchJSON(`{
+				"last_successful_check": "2026-01-02T03:04:05Z",
+				"provider_key": "m360",
+				"state": "BILLING_PROVIDER_STATE_AVAILABLE",
+				"supported_capabilities": ["BILLING_PROVIDER_CAPABILITY_PRICING"],
+				"usage_delivery_state": "BILLING_USAGE_DELIVERY_STATE_UNKNOWN"
+			}`))
+		}),
+		Entry("json, not configured", "json", notConfigured, func(output string) {
+			Expect(output).To(MatchJSON(`{
+				"state": "BILLING_PROVIDER_STATE_NOT_CONFIGURED",
+				"usage_delivery_state": "BILLING_USAGE_DELIVERY_STATE_UNKNOWN"
+			}`))
+		}),
 	)
+
+	It("returns an error when writing the table fails immediately", func() {
+		err := errors.New("write failed")
+		console, buildErr := terminal.NewConsole().SetLogger(logger).SetStdout(failingWriter{err: err}).Build()
+		Expect(buildErr).ToNot(HaveOccurred())
+		Expect(errors.Is(render(ctx, console, "table", available()), err)).To(BeTrue())
+	})
+
+	It("returns an error when writing the table fails after some output is buffered", func() {
+		err := errors.New("write failed")
+		writer := &delayedFailingWriter{err: err, limit: 16}
+		console, buildErr := terminal.NewConsole().SetLogger(logger).SetStdout(writer).Build()
+		Expect(buildErr).ToNot(HaveOccurred())
+		Expect(errors.Is(render(ctx, console, "table", available()), err)).To(BeTrue())
+	})
 })
 
 var _ = Describe("render failures", func() {
@@ -142,3 +179,18 @@ var _ = Describe("render failures", func() {
 		Expect(errors.Is(err, sentinel)).To(BeTrue())
 	})
 })
+
+// delayedFailingWriter accepts a limited number of bytes before failing every write, so part of the output is
+// buffered before the failure surfaces while flushing the table.
+type delayedFailingWriter struct {
+	err   error
+	limit int
+}
+
+func (w *delayedFailingWriter) Write(p []byte) (int, error) {
+	if len(p) > w.limit {
+		return 0, w.err
+	}
+	w.limit -= len(p)
+	return len(p), nil
+}

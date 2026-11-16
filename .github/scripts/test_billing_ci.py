@@ -74,7 +74,7 @@ class BillingCIWiringTests(unittest.TestCase):
         for config, expected in (
             ([{"Gateway": "172.18.0.1"}], "172.18.0.1"),
             ([{"Gateway": "fc00:f853:ccd:e793::1"}, {"Gateway": "172.19.0.1"}], "172.19.0.1"),
-            ([{}, {"Gateway": "172.20.0.1"}, {"Gateway": "172.21.0.1"}], "172.20.0.1"),
+            ([{}, {"Gateway": "172.20.0.1"}], "172.20.0.1"),
         ):
             with self.subTest(config=config):
                 result = self.execute_setup(json.dumps(config))
@@ -94,6 +94,7 @@ class BillingCIWiringTests(unittest.TestCase):
             '[{"Gateway": ""}]',
             '[{"Gateway": "fc00:f853:ccd:e793::1"}]',
             '[{"Gateway": "999.18.0.1"}]',
+            '[{"Gateway": "172.20.0.1"}, {"Gateway": "172.21.0.1"}]',
             '[{"Gateway": "172.18.0.1\\nINJECTED=value"}]',
         ):
             with self.subTest(config=config):

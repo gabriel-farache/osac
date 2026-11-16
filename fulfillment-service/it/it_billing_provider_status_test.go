@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"github.com/osac-project/osac/fulfillment-service/internal/testing/billingfake"
 	"github.com/osac-project/osac/fulfillment-service/internal/testing/billingstub"
 	"github.com/osac-project/osac/fulfillment-service/internal/uuid"
+	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 	publicv1 "github.com/osac-project/osac/proto/gen/osac/public/v1"
 )
 
@@ -387,6 +389,108 @@ var _ = Describe("Billing provider status with a stub M360", Label("billing", "b
 			HaveField("Path", HavePrefix("/api/v1/external/")), HaveField("Authorization", "Bearer "+billingStubToken))))
 		Expect(stub.Writes()).To(BeEmpty())
 		expectCleanLog(ctx)
+	})
+
+	It("lists provider rate-card items through the deployed M360 adapter", func(ctx context.Context) {
+		By("seeding a catalog item locked to a known instance type before the first rate-card read")
+		instanceTypeID := createCatalogItemComputeInstanceTypeFixture(ctx)
+		instanceType, err := privatev1.NewInstanceTypesClient(tool.InternalView().AdminConn()).Get(ctx,
+			privatev1.InstanceTypesGetRequest_builder{Id: instanceTypeID}.Build())
+		Expect(err).ToNot(HaveOccurred())
+		instanceTypeName := instanceType.GetObject().GetMetadata().GetName()
+		Expect(instanceTypeName).ToNot(BeEmpty())
+		template := createCatalogItemComputeInstanceTemplateFixture(ctx, nil, nil)
+		item := createComputeInstanceCatalogItemFixture(ctx, tool.ExternalView().AdminConn(),
+			publicv1.ComputeInstanceCatalogItem_builder{
+				Metadata:  publicv1.Metadata_builder{Name: catalogItemFixtureName(), Tenant: "shared"}.Build(),
+				Template:  publicv1.ComputeInstanceTemplateReference_builder{Id: template}.Build(),
+				Published: true,
+				Fields: publicv1.ComputeInstanceCatalogItemFields_builder{
+					InstanceType: publicv1.InstanceTypeReferenceFieldPolicy_builder{
+						Locked: publicv1.InstanceTypeReference_builder{Name: instanceTypeName, Shared: true}.Build(),
+					}.Build(),
+				}.Build(),
+			}.Build())
+		stub.SetScenario(billingRateCardScenario(instanceTypeName))
+
+		By("reading the public API through the real provider configuration, TLS and normalization path")
+		client := publicv1.NewProviderRateCardItemsClient(tool.ExternalView().AdminConn())
+		var response *publicv1.ProviderRateCardItemsListResponse
+		Eventually(ctx, func(g Gomega) {
+			var err error
+			response, err = client.List(ctx, publicv1.ProviderRateCardItemsListRequest_builder{
+				Service: new("compute_instance"), CurrencyCode: new("USD"),
+			}.Build())
+			g.Expect(err).ToNot(HaveOccurred())
+		}, time.Minute, time.Second).Should(Succeed())
+		Expect(response.GetTotal()).To(Equal(int32(1)))
+		Expect(response.GetItems()).To(HaveLen(1))
+		row := response.GetItems()[0]
+		Expect(row.GetService()).To(Equal("compute_instance"))
+		Expect(row.GetCurrencyCode()).To(Equal("USD"))
+		Expect(row.GetRate().GetAmount()).To(Equal("0.00125"))
+		Expect(row.GetRate().GetUnit()).To(Equal("second"))
+		Expect(row.GetResourceConditions()).To(HaveLen(1))
+		condition := row.GetResourceConditions()[0]
+		Expect(condition.GetDimension()).To(Equal("instance_type"))
+		Expect(condition.GetOperator()).To(Equal(publicv1.BillingRateMatchOperator_BILLING_RATE_MATCH_OPERATOR_EQUALS))
+		Expect(condition.GetValue()).To(Equal(instanceTypeName))
+		Expect(row.GetCatalogItemMatches()).To(ContainElement(item.GetMetadata().GetName()))
+
+		By("proving the pod made only the three expected provider GETs, never writes")
+		Expect(stub.Requests()).To(ConsistOf(
+			SatisfyAll(HaveField("Op", "FindServiceByName"),
+				HaveField("Path", "/api/v1/external/services")),
+			SatisfyAll(HaveField("Op", "ListPriceableAttributes"),
+				HaveField("Path", "/api/v1/external/services/billing-it-compute/priceable-attributes")),
+			SatisfyAll(HaveField("Op", "GetServiceRateCard"),
+				HaveField("Path", "/api/v1/external/services/billing-it-compute/rate-cards/USD")),
+		))
+		Expect(stub.Requests()).To(HaveEach(SatisfyAll(HaveField("Method", http.MethodGet),
+			HaveField("Failed", false), HaveField("Authorization", "Bearer "+billingStubToken))))
+		Expect(stub.Writes()).To(BeEmpty())
+		expectCleanLog(ctx)
+	})
+
+	It("preserves the configured-provider API total in count-only CLI output in every format", func(ctx context.Context) {
+		// Provider rows do not require a catalog match. The preceding rate-card spec covers cross-references;
+		// this spec needs only a positive, deterministic rate card through the existing HTTPS fixture.
+		stub.SetScenario(billingRateCardScenario("billing-it-small"))
+		homeDir, err := tool.NewCLIHomeDir()
+		Expect(err).ToNot(HaveOccurred())
+		DeferCleanup(func() { Expect(os.RemoveAll(homeDir)).To(Succeed()) })
+		_, _, exitCode := tool.LoginCLI(ctx, homeDir, adminUsername, adminsPassword)
+		Expect(exitCode).To(Equal(0), "login should succeed")
+		client := publicv1.NewProviderRateCardItemsClient(tool.ExternalView().AdminConn())
+		for _, format := range []string{"table", "json", "yaml"} {
+			By("comparing count-only " + format + " output with the configured-provider API")
+			Eventually(ctx, func(g Gomega) {
+				attemptCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+				defer cancel()
+				list, err := client.List(attemptCtx, publicv1.ProviderRateCardItemsListRequest_builder{
+					Service: new("compute_instance"), CurrencyCode: new("USD"),
+				}.Build())
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(list.GetTotal()).To(BeNumerically(">", 0))
+				g.Expect(list.GetItems()).ToNot(BeEmpty())
+				count, err := client.List(attemptCtx, publicv1.ProviderRateCardItemsListRequest_builder{
+					Service: new("compute_instance"), CurrencyCode: new("USD"), Limit: new(int32(0)),
+				}.Build())
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(count.GetSize()).To(BeZero())
+				g.Expect(count.GetItems()).To(BeEmpty())
+				g.Expect(count.GetTotal()).To(Equal(list.GetTotal()))
+				stdout, stderr, exitCode := tool.RunCLI(attemptCtx, homeDir,
+					"get", "providerratecarditem", "--service", "compute_instance", "--currency-code", "USD",
+					"--limit", "0", "-o", format)
+				g.Expect(exitCode).To(Equal(0), "stdout: %s\nstderr: %s", stdout, stderr)
+				expectBillingPricingCountOnlyCLI(g, stdout, format, count.GetTotal())
+			}, time.Minute, time.Second).Should(Succeed())
+		}
+		for _, op := range []string{"FindServiceByName", "ListPriceableAttributes", "GetServiceRateCard"} {
+			Expect(stub.Succeeded(op)).To(BeNumerically(">", 0), op)
+		}
+		Expect(stub.Writes()).To(BeEmpty())
 	})
 
 	It("is UNAVAILABLE when the stub provider fails its health check", func(ctx context.Context) {

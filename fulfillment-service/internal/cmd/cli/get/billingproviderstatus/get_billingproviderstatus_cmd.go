@@ -71,7 +71,7 @@ func (c *runnerContext) run(cmd *cobra.Command, args []string) error {
 	return render(ctx, terminal.ConsoleFromContext(ctx), c.format, response.GetObject())
 }
 
-// render writes the status as a table, JSON or YAML.
+// render writes the status as a table, JSON or YAML; the JSON and YAML encoding is shared in the rendering package.
 func render(ctx context.Context, console *terminal.Console, format string,
 	status *publicv1.BillingProviderStatus) error {
 	if format == output.Table {

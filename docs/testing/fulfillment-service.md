@@ -88,6 +88,16 @@ identity E2E is [OSAC-6614](https://redhat.atlassian.net/browse/OSAC-6614).
   serially restart and restore the grpc-server. Secret mounts are patched by
   the fixture, not rendered by the installer, so this does not verify chart
   wiring. Real-provider and cross-component E2E are outside this boundary.
+- Catalog pricing inventory, rate resolution, and provider rate cards
+  ([OSAC-6873](https://redhat.atlassian.net/browse/OSAC-6873),
+  [OSAC-6889](https://redhat.atlassian.net/browse/OSAC-6889),
+  [OSAC-6890](https://redhat.atlassian.net/browse/OSAC-6890),
+  [OSAC-6891](https://redhat.atlassian.net/browse/OSAC-6891)): pricing and
+  rate-card handlers run in process with `internal/testing/billingfake` and
+  real PostgreSQL, and regular-user denials run against the deployed public
+  and private APIs. The configured-provider read paths use
+  `internal/testing/billingstub` over HTTPS in the existing fulfillment CI
+  leg. No real M360 provider is contacted.
 
 ## Coverage gaps
 
@@ -112,6 +122,14 @@ identity E2E is [OSAC-6614](https://redhat.atlassian.net/browse/OSAC-6614).
   [OSAC-6871](https://redhat.atlassian.net/browse/OSAC-6871) remediation scope.
   The contract-shaped stub does not prove that boundary; no owning E2E ticket
   is assigned by this change.
+- The billing stub credential and CA mounts, and the shortened catalog cache
+  interval one catalog-pricing case needs to observe a refresh inside its poll,
+  are patched directly on the deployed Deployment by the `it/` specs. Both
+  fixtures wait for Deployment rollout and reads through the public and private
+  API routes after patching and restoring the pod spec. These fixtures do not
+  verify chart installation of the mounts or the `service.tuning.cache` values;
+  chart wiring remains a coverage gap
+  ([OSAC-6873](https://redhat.atlassian.net/browse/OSAC-6873)).
 
 ## Fulfillment integration reports
 

@@ -18,20 +18,19 @@ package output
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/osac-project/osac/fulfillment-service/internal/rendering"
 	"github.com/osac-project/osac/fulfillment-service/internal/terminal"
 )
 
 // The supported -o values.
 const (
-	Table = "table"
-	Json  = "json"
-	Yaml  = "yaml"
+	Table = rendering.Table
+	Json  = rendering.JSON
+	Yaml  = rendering.YAML
 )
 
 // FlagHelp documents the -o flag next to Validate, which enforces the values it names. The {{ bt }} markers are
@@ -40,22 +39,15 @@ const FlagHelp = `_FORMAT_ - Output format. Must be one of {{ bt }}table{{ bt }}
 
 // Validate fails when format is not one of Table, Json or Yaml.
 func Validate(format string) error {
-	if format != Table && format != Json && format != Yaml {
-		return fmt.Errorf("unknown output format '%s', should be '%s', '%s' or '%s'", format, Table, Json, Yaml)
-	}
-	return nil
+	return rendering.ValidateFormat(format)
 }
 
 // Render writes message to console as JSON or YAML per format, encoding through protojson with proto field names.
 // Table rendering belongs to the caller. label names the entity in encoding errors; console write failures are
 // logged but not returned, so a broken output stream goes unreported here.
 func Render(ctx context.Context, console *terminal.Console, format string, label string, message proto.Message) error {
-	data, err := protojson.MarshalOptions{UseProtoNames: true}.Marshal(message)
+	value, err := rendering.Encode(message)
 	if err != nil {
-		return fmt.Errorf("failed to encode %s: %w", label, err)
-	}
-	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
 		return fmt.Errorf("failed to encode %s: %w", label, err)
 	}
 	if format == Json {
@@ -78,8 +70,5 @@ func Infof(console *terminal.Console, format string, args ...any) error {
 // OrDash returns value, or "-" when it is empty, so a table can tell "not supplied" apart from a rendering
 // bug.
 func OrDash(value string) string {
-	if value == "" {
-		return "-"
-	}
-	return value
+	return rendering.Dash(value)
 }

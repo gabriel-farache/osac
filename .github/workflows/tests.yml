@@ -155,7 +155,7 @@ jobs:
             [.[] | .Gateway // empty
              | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$"))
              | select(split(".") | all(tonumber <= 255))]
-            | first // error("Kind network has no IPv4 gateway")
+            | if length == 1 then .[0] else error("expected one IPv4 Kind gateway") end
           ')"
           {
             echo 'OSAC_IT_BILLING_STUB_LISTEN=0.0.0.0:18443'

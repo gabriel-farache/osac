@@ -81,7 +81,7 @@ func configureBillingStub(ctx context.Context, stub *billingstub.Stub, listen, s
 		Expect(kube.Get(ctx, key, latest)).To(Succeed())
 		latest.Spec.Template.Spec = *original
 		Expect(kube.Update(ctx, latest)).To(Succeed())
-		rolloutBillingDeployment(ctx)
+		waitForFulfillmentRollout(ctx, key)
 		// Deployment availability doesn't mean the ingress has refreshed its headless-service DNS endpoints.
 		Eventually(ctx, func(g Gomega) {
 			object, err := billingStubStatus(ctx)
@@ -120,22 +120,7 @@ func configureBillingStub(ctx context.Context, stub *billingstub.Stub, listen, s
 		)
 	}
 	Expect(kube.Update(ctx, current)).To(Succeed())
-	rolloutBillingDeployment(ctx)
-}
-
-// rolloutBillingDeployment waits until the grpc-server deployment's current generation is fully rolled out.
-func rolloutBillingDeployment(ctx context.Context) {
-	GinkgoHelper()
-	Eventually(ctx, func(g Gomega) {
-		current := &appsv1.Deployment{}
-		g.Expect(tool.KubeClient().Get(ctx, crclient.ObjectKey{
-			Namespace: billingStubNamespace, Name: billingStubDeployment}, current)).To(Succeed())
-		g.Expect(current.Spec.Replicas).ToNot(BeNil())
-		g.Expect(current.Status.ObservedGeneration).To(BeNumerically(">=", current.Generation))
-		g.Expect(current.Status.UpdatedReplicas).To(Equal(*current.Spec.Replicas))
-		g.Expect(current.Status.Replicas).To(Equal(*current.Spec.Replicas))
-		g.Expect(current.Status.AvailableReplicas).To(Equal(*current.Spec.Replicas))
-	}, 3*time.Minute, time.Second).Should(Succeed())
+	waitForFulfillmentRollout(ctx, key)
 }
 
 // billingStubStatus reads the deployed billing provider status through the public API.
