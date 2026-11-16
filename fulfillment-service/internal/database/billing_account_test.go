@@ -215,50 +215,50 @@ var _ = Describe("Billing accounts", func() {
 
 		It("copies the provider correlation value only when the local value is null", func() {
 			upsert(BillingAccountUpsert{
-				ProviderKey: "m360", ProviderAccountReference: "acct-1", CorrelationID: "ext-1", State: "ACTIVE",
+				ProviderKey: "m360", ProviderAccountReference: "acct-1", ExternalBillingAccountID: "ext-1", State: "ACTIVE",
 			})
 			items, _, err := ListBillingAccounts(ctx, tx, 0, 10, "", "")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(items[0].CorrelationID).To(Equal("ext-1"))
+			Expect(items[0].ExternalBillingAccountID).To(Equal("ext-1"))
 		})
 
-		It("never overwrites a non-null local correlation_id with a different provider value", func() {
+		It("never overwrites a non-null local external_billing_account_id with a different provider value", func() {
 			upsert(BillingAccountUpsert{
-				ProviderKey: "m360", ProviderAccountReference: "acct-1", CorrelationID: "ext-1", State: "ACTIVE",
+				ProviderKey: "m360", ProviderAccountReference: "acct-1", ExternalBillingAccountID: "ext-1", State: "ACTIVE",
 			})
 			upsert(BillingAccountUpsert{
-				ProviderKey: "m360", ProviderAccountReference: "acct-1", CorrelationID: "ext-2", State: "ACTIVE",
+				ProviderKey: "m360", ProviderAccountReference: "acct-1", ExternalBillingAccountID: "ext-2", State: "ACTIVE",
 			})
 			items, _, err := ListBillingAccounts(ctx, tx, 0, 10, "", "")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(items[0].CorrelationID).To(Equal("ext-1"), "discovery must never overwrite a differing value")
+			Expect(items[0].ExternalBillingAccountID).To(Equal("ext-1"), "discovery must never overwrite a differing value")
 		})
 
-		It("leaves both rows unchanged when two accounts would share one correlation_id", func() {
+		It("leaves both rows unchanged when two accounts would share one external_billing_account_id", func() {
 			upsert(BillingAccountUpsert{
-				ProviderKey: "m360", ProviderAccountReference: "acct-1", CorrelationID: "ext-dup", State: "ACTIVE",
+				ProviderKey: "m360", ProviderAccountReference: "acct-1", ExternalBillingAccountID: "ext-dup", State: "ACTIVE",
 			})
 			upsert(BillingAccountUpsert{
-				ProviderKey: "m360", ProviderAccountReference: "acct-2", CorrelationID: "ext-dup", State: "ACTIVE",
+				ProviderKey: "m360", ProviderAccountReference: "acct-2", ExternalBillingAccountID: "ext-dup", State: "ACTIVE",
 			})
 			items, _, err := ListBillingAccounts(ctx, tx, 0, 10, `this.provider_key == "m360"`, "id")
 			Expect(err).ToNot(HaveOccurred())
 			var withCorrelation int
 			for _, item := range items {
-				if item.CorrelationID == "ext-dup" {
+				if item.ExternalBillingAccountID == "ext-dup" {
 					withCorrelation++
 				}
 			}
 			Expect(withCorrelation).To(Equal(1), "the unique index must never be violated by a second write")
 		})
 
-		It("leaves correlation_id null when the account has no native value", func() {
+		It("leaves external_billing_account_id null when the account has no native value", func() {
 			upsert(BillingAccountUpsert{
 				ProviderKey: "m360", ProviderAccountReference: "acct-1", State: "ACTIVE",
 			})
 			items, _, err := ListBillingAccounts(ctx, tx, 0, 10, "", "")
 			Expect(err).ToNot(HaveOccurred())
-			Expect(items[0].CorrelationID).To(BeEmpty())
+			Expect(items[0].ExternalBillingAccountID).To(BeEmpty())
 		})
 	})
 
@@ -267,7 +267,7 @@ var _ = Describe("Billing accounts", func() {
 			observed := time.Now().UTC().Truncate(time.Second)
 			id := upsert(BillingAccountUpsert{
 				ProviderKey: "m360", ProviderAccountReference: "acct-1", DisplayName: "Acme",
-				CorrelationID: "corr", State: "ACTIVE", StatusObservedAt: observed,
+				ExternalBillingAccountID: "corr", State: "ACTIVE", StatusObservedAt: observed,
 			})
 			state, at, err := ObserveBillingAccountState(ctx, tx, id, "INACTIVE", observed.Add(time.Minute))
 			Expect(err).ToNot(HaveOccurred())
@@ -278,7 +278,7 @@ var _ = Describe("Billing accounts", func() {
 			Expect(items[0].State).To(Equal("INACTIVE"))
 			Expect(items[0].StatusObservedAt).To(BeTemporally("==", observed.Add(time.Minute)))
 			Expect(items[0].DisplayName).To(Equal("Acme"), "an assignment read must not change account metadata")
-			Expect(items[0].CorrelationID).To(Equal("corr"))
+			Expect(items[0].ExternalBillingAccountID).To(Equal("corr"))
 		})
 
 		It("ignores an older observation and returns the newer stored one", func() {
@@ -413,6 +413,25 @@ var _ = Describe("Billing accounts", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(total).To(Equal(int32(1)))
 			Expect(items[0].DisplayName).To(Equal("Alpha"))
+		})
+
+		It("filters and orders by external_billing_account_id", func() {
+			upsert(BillingAccountUpsert{
+				ProviderKey: "m360", ProviderAccountReference: "acct-3", ExternalBillingAccountID: "ext-3",
+			})
+			items, total, err := ListBillingAccounts(ctx, tx, 0, 10,
+				`this.external_billing_account_id == "ext-3"`, "external_billing_account_id desc")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(total).To(Equal(int32(1)))
+			Expect(items).To(HaveLen(1))
+			Expect(items[0].ExternalBillingAccountID).To(Equal("ext-3"))
+		})
+
+		It("rejects the old correlation_id filter and order names", func() {
+			_, _, err := ListBillingAccounts(ctx, tx, 0, 10, `this.correlation_id == "ext-3"`, "")
+			Expect(err).To(BeAssignableToTypeOf(&ErrInvalidFlatTableQuery{}))
+			_, _, err = ListBillingAccounts(ctx, tx, 0, 10, "", "correlation_id")
+			Expect(err).To(BeAssignableToTypeOf(&ErrInvalidFlatTableQuery{}))
 		})
 
 		It("orders by a known field ascending and descending", func() {

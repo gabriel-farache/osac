@@ -120,9 +120,9 @@ var _ = Describe("render", func() {
 
 	active := publicv1.BillingAccount_builder{
 		Id: "ba-1", ProviderKey: "m360", DisplayName: "Acme production", BaseCurrency: "USD",
-		State:            publicv1.BillingAccountState_BILLING_ACCOUNT_STATE_ACTIVE,
-		StatusObservedAt: timestamppb.New(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
-		CorrelationId:    "acct-corr-1001",
+		State:                    publicv1.BillingAccountState_BILLING_ACCOUNT_STATE_ACTIVE,
+		StatusObservedAt:         timestamppb.New(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		ExternalBillingAccountId: "acct-corr-1001",
 	}.Build()
 
 	unknownNoCurrency := publicv1.BillingAccount_builder{
@@ -142,14 +142,16 @@ var _ = Describe("render", func() {
 		Expect(output).To(MatchRegexp(`\bACTIVE\b`))
 		Expect(output).ToNot(ContainSubstring("BILLING_ACCOUNT_STATE_"))
 		Expect(output).To(ContainSubstring("acct-corr-1001"))
+		Expect(output).To(ContainSubstring("EXTERNAL-BILLING-ACCOUNT-ID"))
+		Expect(output).ToNot(ContainSubstring("CORRELATION-ID"))
 		Expect(stderr).To(BeEmpty())
 	})
 
 	It("strips control characters from provider-supplied cells in table mode", func() {
 		dirty := publicv1.BillingAccount_builder{
 			Id: "ba-3", ProviderKey: "m360", DisplayName: "Acme\x1b]52;x;wg\x07",
-			State:         publicv1.BillingAccountState_BILLING_ACCOUNT_STATE_ACTIVE,
-			CorrelationId: "corr\t\n1001",
+			State:                    publicv1.BillingAccountState_BILLING_ACCOUNT_STATE_ACTIVE,
+			ExternalBillingAccountId: "corr\t\n1001",
 		}.Build()
 		output, stderr := run("table", 0, listWith(dirty))
 		Expect(output).ToNot(ContainSubstring("\x1b"), "a terminal escape must not reach the console")
@@ -184,7 +186,7 @@ var _ = Describe("render", func() {
 		Expect(stderr).To(Equal("No billing accounts on this page: offset 5 is at or beyond the total 5.\n"))
 	})
 
-	It("renders JSON with API field names, omitting empty base_currency and correlation_id", func() {
+	It("renders JSON with API field names, omitting empty base_currency and external_billing_account_id", func() {
 		output, stderr := run("json", 0, listWith(unknownNoCurrency))
 		Expect(output).To(MatchJSON(`{
 			"size": 1,
@@ -202,7 +204,15 @@ var _ = Describe("render", func() {
 	It("renders YAML with API field names", func() {
 		output, stderr := run("yaml", 0, listWith(active))
 		Expect(output).To(ContainSubstring("base_currency: USD"))
-		Expect(output).To(ContainSubstring("correlation_id: acct-corr-1001"))
+		Expect(output).To(ContainSubstring("external_billing_account_id: acct-corr-1001"))
+		Expect(output).ToNot(ContainSubstring("correlation_id"))
+		Expect(stderr).To(BeEmpty())
+	})
+
+	It("renders the populated external billing account id in JSON without the old field", func() {
+		output, stderr := run("json", 0, listWith(active))
+		Expect(output).To(MatchRegexp(`"external_billing_account_id"\s*:\s*"acct-corr-1001"`))
+		Expect(output).ToNot(ContainSubstring("correlation_id"))
 		Expect(stderr).To(BeEmpty())
 	})
 })
