@@ -254,6 +254,9 @@ spec:
         - --token-signer-key=/etc/fulfillment-token-signer/tls.key
         - --token-encryption-crt=/etc/fulfillment-token-encryption/tls.crt
         - --token-issuer={{ include "fulfillment-api.tokenIssuerUrl" . }}
+        {{- if .Values.auth.meteringServiceAccount }}
+        - --metering-service-account=system:serviceaccount:{{ .Release.Namespace }}:{{ tpl .Values.auth.meteringServiceAccount . }}
+        {{- end }}
         - --metrics-listener-address=0.0.0.0:8002
         - --enable-caas={{ include "fulfillment-service.serviceEnabled" (list . "caas") }}
         - --enable-vmaas={{ include "fulfillment-service.serviceEnabled" (list . "vmaas") }}

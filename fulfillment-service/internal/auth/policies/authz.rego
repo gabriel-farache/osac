@@ -34,13 +34,35 @@ is_managed_service_account_valid if {
 }
 
 allow if {
+  not is_metering_read
   not is_managed_service_account_candidate
   legacy_allow
 }
 
 allow if {
+  not is_metering_read
   is_managed_service_account_valid
   managed_service_account_grant
+}
+
+is_metering_read if {
+  grpc_method == "/osac.private.v1.TenantBillingAssignments/GetActiveBillingAccount"
+}
+
+metering_read_grant if {
+  is_metering_read
+  not is_managed_service_account_candidate
+  input.auth.identity.authnMethod == "serviceaccount"
+  data.metering_issuer != ""
+  data.metering_subject != ""
+  data.metering_audience != ""
+  input.auth.identity.validated_issuer == data.metering_issuer
+  input.auth.identity.validated_subject == data.metering_subject
+  data.metering_audience in input.auth.identity.validated_audiences
+}
+
+allow if {
+  metering_read_grant
 }
 
 # Emergency service accounts are Kubernetes service accounts that are allowed to act as administrators in case of
@@ -762,5 +784,11 @@ subject_tenant_result = subject_tenants if {
 subject_tenant_result = [split(input.auth.identity.user.username, ":")[2]] if {
   not is_admin
   not is_csi
+  not metering_read_grant
   input.auth.identity.authnMethod == "serviceaccount"
+}
+
+# Only the attribution read receives cross-tenant machine scope.
+subject_tenant_result = ["*"] if {
+  metering_read_grant
 }

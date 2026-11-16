@@ -37,6 +37,11 @@ func ExtractAuthContext(token *jwt.Token) (*AuthContext, error) {
 	_, kube := claims["kubernetes.io"]
 
 	authContext := &AuthContext{}
+	if token.Valid {
+		authContext.validatedIssuer, _ = claims.GetIssuer()
+		authContext.validatedSubject, _ = claims.GetSubject()
+		authContext.validatedAudiences, _ = claims.GetAudience()
+	}
 	authContext.extractManagedServiceAccountClaims(claims)
 
 	if kube {

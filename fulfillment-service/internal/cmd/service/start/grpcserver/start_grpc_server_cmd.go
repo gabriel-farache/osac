@@ -150,6 +150,8 @@ func Cmd() *cobra.Command {
 		[]string{},
 		grpcAuthnTrustedTokenIssuersFlagHelp,
 	)
+	flags.StringVar(&runner.args.meteringSubject, "metering-service-account", "",
+		"Full Kubernetes service-account subject allowed to read connected metering attribution.")
 	flags.StringVar(
 		&runner.args.tenancyLogic,
 		"tenancy-logic",
@@ -229,6 +231,7 @@ type runnerContext struct {
 		authType                 string
 		externalAuthAddress      string
 		trustedTokenIssuers      []string
+		meteringSubject          string
 		tenancyLogic             string
 		tokenSignerCrt           string
 		tokenSignerKey           string
@@ -508,6 +511,7 @@ func (c *runnerContext) run(cmd *cobra.Command, argv []string) error { //nolint:
 
 	// Create the authorization evaluator:
 	evaluator, err := auth.NewEvaluator().
+		SetMeteringIdentity(auth.KubernetesIssuer(jwksCache), c.args.meteringSubject, auth.MeteringAudience).
 		AddEmergencyServiceAccounts(c.args.emergencyServiceAccounts).
 		SetManagedServiceAccountResolver(serviceaccounts.ResolveAuthorization).
 		SetTenantResolver(database.ResolveLiveTenantNames).

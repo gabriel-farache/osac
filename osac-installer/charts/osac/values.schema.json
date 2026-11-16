@@ -976,6 +976,10 @@
               "type": "array",
               "description": "Controller credential volume sources"
             },
+            "meteringServiceAccount": {
+              "type": "string",
+              "description": "Existing producer ServiceAccount name in the release namespace, derived from the metering chart. Empty disables only its private attribution read; no OAuth client is provisioned."
+            },
             "emergencyServiceAccounts": {
               "type": "array",
               "description": "Service accounts that bypass standard authentication",
@@ -1796,6 +1800,17 @@
       "type": "object",
       "description": "OSAC Metering Service configuration",
       "properties": {
+        "fulfillment": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string",
+              "description": "Private Fulfillment gRPC target for optional current billing attribution. TLS uses the shared CA bundle and a dedicated projected pod token. Unavailable attribution never stops usage.",
+              "default": "fulfillment-internal-api:8001"
+            }
+          },
+          "additionalProperties": false
+        },
         "image": {
           "type": "object",
           "properties": {

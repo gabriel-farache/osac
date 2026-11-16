@@ -688,7 +688,7 @@ var _ = Describe("Runner DLQ integration", func() {
 			dlqSender.mu.Lock()
 			defer dlqSender.mu.Unlock()
 			Expect(dlqSender.sends).To(HaveLen(1))
-			Expect(dlqSender.sends[0].reason).To(ContainSubstring("bad schema"))
+			Expect(dlqSender.sends[0].reason).To(Equal("SUBMIT_NON_RETRYABLE"))
 			Expect(dlqSender.sends[0].attempts).To(Equal(1))
 		})
 
@@ -763,7 +763,7 @@ var _ = Describe("Runner DLQ integration", func() {
 			dlqSender.mu.Lock()
 			defer dlqSender.mu.Unlock()
 			Expect(dlqSender.sends).To(HaveLen(1))
-			Expect(dlqSender.sends[0].reason).To(ContainSubstring("always fails"))
+			Expect(dlqSender.sends[0].reason).To(Equal("SUBMIT_RETRIES_EXHAUSTED"))
 			Expect(dlqSender.sends[0].attempts).To(Equal(3)) // maxRetries=3
 		})
 	})

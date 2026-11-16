@@ -170,7 +170,7 @@ func writeTerms(out *strings.Builder) {
 		{"Rule", "A meter definition in a rule revision: the states that bill, the dimensions the meter carries, and the multiplier."},
 		{"Rule revision", "An immutable set of meter rules with an effective date. The chart ships the default revision."},
 		{"Schema version", "The published shape of a usage event, named by the suffix of its CloudEvent type, for example `v1`."},
-		{"External billing account id", "The tenant's id in the provider's billing system, carried by usage events when the tenant has one. The provider supplies the id and owns its correctness. M360 keeps its own tenant mapping, so this is the provider's identifier."},
+		{"External billing account id", "Optional opaque attribution from the tenant's current CONNECTED billing assignment. It is distinct from tenant and provider-native account ids. M360 keeps its own tenant mapping."},
 	}
 	for _, term := range terms {
 		fmt.Fprintf(out, "| %s | %s |\n", term[0], term[1])
@@ -546,15 +546,22 @@ func writeBillingAccount(out *strings.Builder, sources Sources) {
 		}
 		fmt.Fprintf(out,
 			"Schema version `%s` and later carry `external_billing_account_id` when the "+
-				"tenant has one%s. A tenant without one omits it. The field is optional. The "+
-				"provider supplies it and ensures it matches the account in their billing "+
-				"system; OSAC copies it as given. M360 keeps its own mapping.\n\n",
+				"tenant has one%s. The field is optional. Newly constructed bodies read the "+
+				"current CONNECTED billing assignment through the private Fulfillment API, "+
+				"using only the BillingAccount's stored external billing account id. Metering "+
+				"never falls back to the manually stamped tenant value. Missing or pending "+
+				"assignments, read failures or absent configuration omit the field without "+
+				"stopping usage. The lookup budget is 500 ms, with a per-tenant snapshot aged "+
+				"from lookup start for at most one second. No provider call, account-state or "+
+				"rate gate is involved. M360 keeps its existing mapping and field exclusion.\n\n",
 			first, earlier)
 		fmt.Fprintf(out,
 			"The id never correlates usage. Match a correction to the event it corrects by "+
 				"tenant, resource, meter, component, and billing dimensions. The id can change "+
 				"while usage is in flight: metering stamps each event with the id current "+
-				"when its round builds it and never rewrites published events.\n\n")
+				"when its round builds it and never rewrites persisted outbox or published "+
+				"events. Relay and recovery use the original bytes without attribution reads. "+
+				"Retained older v1 events remain valid; published v1 schema bytes are unchanged.\n\n")
 		return
 	}
 	fmt.Fprintf(out,

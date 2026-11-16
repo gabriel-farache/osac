@@ -83,20 +83,22 @@ func (r *Runner) processMessage(
 	if result.Err != nil {
 		if result.NonRetryable {
 			r.metrics.eventsFailed.WithLabelValues(provider, "non_retryable").Inc()
-			r.logger.Error(result.Err, "non-retryable error processing event",
+			r.logger.Error(nil, "non-retryable error processing event",
+				"reason", "SUBMIT_NON_RETRYABLE",
 				"event_id", eventID, "topic", msg.Topic,
 				"partition", msg.Partition, "offset", msg.Offset,
 			)
-			if err := r.sendToDLQ(msg, result.Err.Error(), result.Attempts, provider); err != nil {
+			if err := r.sendToDLQ(msg, "SUBMIT_NON_RETRYABLE", result.Attempts, provider); err != nil {
 				return false
 			}
 		} else if result.Exhausted {
 			r.metrics.eventsFailed.WithLabelValues(provider, "retries_exhausted").Inc()
-			r.logger.Error(result.Err, "retries exhausted processing event",
+			r.logger.Error(nil, "retries exhausted processing event",
+				"reason", "SUBMIT_RETRIES_EXHAUSTED",
 				"event_id", eventID, "topic", msg.Topic,
 				"partition", msg.Partition, "offset", msg.Offset,
 			)
-			if err := r.sendToDLQ(msg, result.Err.Error(), result.Attempts, provider); err != nil {
+			if err := r.sendToDLQ(msg, "SUBMIT_RETRIES_EXHAUSTED", result.Attempts, provider); err != nil {
 				return false
 			}
 		} else {
@@ -104,7 +106,8 @@ func (r *Runner) processMessage(
 			// dead-lettered. Stop the claim so no later message advances the offset
 			// past this one; the next session redelivers it.
 			r.metrics.eventsFailed.WithLabelValues(provider, "retries_interrupted").Inc()
-			r.logger.Error(result.Err, "submit interrupted, stopping the claim; the message is redelivered",
+			r.logger.Error(nil, "submit interrupted, stopping the claim; the message is redelivered",
+				"reason", "SUBMIT_INTERRUPTED",
 				"event_id", eventID, "topic", msg.Topic,
 				"partition", msg.Partition, "offset", msg.Offset,
 			)
@@ -133,7 +136,8 @@ func (r *Runner) sendToDLQ(msg *sarama.ConsumerMessage, reason string, attempts 
 		return nil
 	}
 	if err := r.dlq.Send(msg, reason, attempts); err != nil {
-		r.logger.Error(err, "failed to send event to DLQ, event will be redelivered",
+		r.logger.Error(nil, "failed to send event to DLQ, event will be redelivered",
+			"reason", "DLQ_SEND_FAILED",
 			"topic", msg.Topic, "partition", msg.Partition, "offset", msg.Offset,
 		)
 		r.metrics.dlqSendErrors.WithLabelValues(provider).Inc()

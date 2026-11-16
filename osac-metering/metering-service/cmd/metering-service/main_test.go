@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	kafkapkg "github.com/osac-project/osac-metering/internal/kafka"
 )
 
@@ -42,6 +43,15 @@ func TestValidateRejectsDestructiveRetention(t *testing.T) {
 		cfg.topicRetentionMS = retention
 		if err := cfg.validate(); err != nil {
 			t.Fatalf("retention %q must be accepted, got %v", retention, err)
+		}
+	}
+}
+
+func TestOptionalAttributionConfigurationDoesNotGateUsage(t *testing.T) {
+	for _, assignment := range []attribution.Config{{}, {Address: "unavailable:1", CAFile: "/missing-ca", TokenFile: "/missing-token"}} {
+		cfg := config{kafka: kafkapkg.ConnectionConfig{Brokers: "b:9093"}, dbURLFile: "/db", deploymentID: "osac/osac", topicRetentionMS: "-1", attribution: assignment}
+		if err := cfg.validate(); err != nil {
+			t.Fatal("optional attribution became a startup gate", err)
 		}
 	}
 }

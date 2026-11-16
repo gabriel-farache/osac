@@ -33,12 +33,14 @@ import (
 
 	kafkapkg "github.com/osac-project/osac-metering/internal/kafka"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/rules"
 	"github.com/osac-project/osac-metering/internal/service"
 )
 
 type config struct {
+	attribution   attribution.Config
 	healthAddr    string
 	kafka         kafkapkg.ConnectionConfig
 	dbURLFile     string
@@ -74,6 +76,10 @@ func main() {
 
 func configFromEnv() *config {
 	return &config{
+		attribution: attribution.Config{
+			Address: os.Getenv("FULFILLMENT_ADDRESS"), CAFile: os.Getenv("FULFILLMENT_CA_FILE"),
+			TokenFile: os.Getenv("FULFILLMENT_TOKEN_FILE"),
+		},
 		healthAddr: envOrDefault("HEALTH_ADDR", ":8080"),
 		kafka: kafkapkg.ConnectionConfig{
 			Brokers: os.Getenv("KAFKA_BROKERS"),
@@ -185,14 +191,17 @@ func run(ctx context.Context, logger logr.Logger, cfg *config) error {
 	if err != nil {
 		return err
 	}
+	assignment := attribution.NewClient(cfg.attribution)
+	defer func() { _ = assignment.Close() }()
 	metering, err := service.New(ctx, service.Config{
-		Kafka:            cfg.kafka,
-		Store:            database.NewStore(dbPool),
-		Rules:            rulesSource,
-		HeartbeatTick:    cfg.heartbeatTick,
-		DeploymentID:     cfg.deploymentID,
-		Logger:           logger,
-		TopicRetentionMS: cfg.topicRetentionMS,
+		AssignmentResolver: assignment.Resolve,
+		Kafka:              cfg.kafka,
+		Store:              database.NewStore(dbPool),
+		Rules:              rulesSource,
+		HeartbeatTick:      cfg.heartbeatTick,
+		DeploymentID:       cfg.deploymentID,
+		Logger:             logger,
+		TopicRetentionMS:   cfg.topicRetentionMS,
 	})
 	if err != nil {
 		return err

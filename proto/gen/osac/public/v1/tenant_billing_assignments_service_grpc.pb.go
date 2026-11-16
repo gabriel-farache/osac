@@ -42,7 +42,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled every method fails
+// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled administrative methods fail
 // with FAILED_PRECONDITION/BILLING_NOT_CONFIGURED before any provider call. Administrator method authorization is
 // required, and assignment access is further limited to the caller's trusted tenant scope. Current platform
 // administrators have universal scope. There is no tenant self-service read path.
@@ -118,7 +118,7 @@ func (c *tenantBillingAssignmentsClient) Update(ctx context.Context, in *TenantB
 // All implementations must embed UnimplementedTenantBillingAssignmentsServer
 // for forward compatibility.
 //
-// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled every method fails
+// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled administrative methods fail
 // with FAILED_PRECONDITION/BILLING_NOT_CONFIGURED before any provider call. Administrator method authorization is
 // required, and assignment access is further limited to the caller's trusted tenant scope. Current platform
 // administrators have universal scope. There is no tenant self-service read path.

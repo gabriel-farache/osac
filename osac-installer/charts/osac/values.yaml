@@ -232,6 +232,8 @@ service:
     caBundle:
       configMap: ca-bundle
   auth:
+    # Derived from the existing metering chart's name; not an OAuth client or a new SA.
+    meteringServiceAccount: '{{ include "osac-metering.fullname" (dict "Chart" (dict "Name" "metering") "Release" .Release "Values" dict) }}'
     # tpl is applied at render time -- {{ .Values.global.clusterDomain }}
     # expands via global.clusterDomain. Platforms that don't set
     # global.clusterDomain (e.g. kind) must override this explicitly instead.
@@ -425,6 +427,8 @@ ui:
 # revenue. The database wiring points at the secrets this chart's
 # workload-db-secrets template creates for the configured DB host.
 metering:
+  fulfillment:
+    address: fulfillment-internal-api:8001
   image:
     repository: ghcr.io/osac-project/metering-service
     tag: latest  # PLACEHOLDER -- overwritten at release time by osac-build-and-publish.yaml

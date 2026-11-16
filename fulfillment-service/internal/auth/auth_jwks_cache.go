@@ -56,6 +56,21 @@ type JwksCache interface {
 	Get(ctx context.Context, issuerUrl string, keyId string) (keyObj any, err error)
 }
 
+// KubernetesIssuer returns the issuer loaded from the receiver's mounted Kubernetes
+// token during JWKS configuration, never an issuer supplied by an incoming request.
+func KubernetesIssuer(cache JwksCache) string {
+	if configured, ok := cache.(*jwksCache); ok {
+		for issuer, info := range configured.issuersInfo {
+			if info.tokenFile != "" {
+				return issuer
+			}
+		}
+	}
+	return ""
+}
+
+const MeteringAudience = "osac-metering-attribution"
+
 // JwksCacheBuilder contains the data and logic needed to build a cache that knows how to discover and load JSON web key
 // sets from a list of trusted issuers. Don't create instances of this type directly, use the NewJwksCache function
 type JwksCacheBuilder struct {

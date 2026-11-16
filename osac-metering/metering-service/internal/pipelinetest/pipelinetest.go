@@ -61,21 +61,22 @@ type Pipeline struct {
 
 // NewPipeline builds the pipeline on a fresh database, billing under the chart's
 // default revision.
-func NewPipeline(t *testing.T, tenant string) *Pipeline {
+func NewPipeline(t *testing.T, tenant string, options ...round.Option) *Pipeline {
 	t.Helper()
-	return NewPipelineOnStore(t, tenant, testenv.Database(t))
+	return NewPipelineOnStore(t, tenant, testenv.Database(t), options...)
 }
 
 // NewPipelineOnStore builds the pipeline on the given store, billing under the chart's
 // default revision: a restored database replays under the shipped rules.
-func NewPipelineOnStore(t *testing.T, tenant string, store *database.Store) *Pipeline {
+func NewPipelineOnStore(t *testing.T, tenant string, store *database.Store, options ...round.Option) *Pipeline {
 	t.Helper()
-	return NewPipelineWithRevisions(t, tenant, store, []rules.Revision{testenv.DefaultRevision(t)})
+	return NewPipelineWithRevisions(t, tenant, store, []rules.Revision{testenv.DefaultRevision(t)}, options...)
 }
 
 // NewPipelineWithRevisions builds the pipeline billing under the given revisions.
 func NewPipelineWithRevisions(
 	t *testing.T, tenant string, store *database.Store, revisions []rules.Revision,
+	options ...round.Option,
 ) *Pipeline {
 	t.Helper()
 	owners, err := usage.RegistryOwners()
@@ -93,6 +94,7 @@ func NewPipelineWithRevisions(
 	roundLoop, err := round.New(
 		store, calculator, testenv.NewClient(t), testenv.NewConsumer(t), logr.Discard(),
 		&sync.RWMutex{},
+		options...,
 	)
 	if err != nil {
 		t.Fatalf("creating round: %v", err)

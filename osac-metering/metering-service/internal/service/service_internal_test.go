@@ -25,13 +25,16 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	cloudevents "github.com/cloudevents/sdk-go/v2"
 	"github.com/go-logr/logr"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/heartbeat"
 	"github.com/osac-project/osac-metering/internal/kafka"
 	"github.com/osac-project/osac-metering/internal/rules"
 	"github.com/osac-project/osac-metering/internal/testenv"
+	"github.com/osac-project/osac-metering/internal/topics"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 )
 
@@ -39,6 +42,99 @@ func TestMain(m *testing.M) {
 	code := m.Run()
 	testenv.StopContainers()
 	os.Exit(code)
+}
+
+func TestServiceWiresOptionalAttributionAndStaysHealthyDuringReadFailure(t *testing.T) {
+	const tenant = "service-attribution"
+	now := time.Now().UTC().Truncate(time.Second)
+	testenv.ProduceEvents(t, tenant, []*privatev1.Event{
+		testenv.VMEvent("seed", privatev1.EventType_EVENT_TYPE_OBJECT_CREATED, now, now.Add(-time.Minute), "web", "RUNNING", now.Add(-time.Minute), "small", now.Add(-time.Minute)),
+	})
+	store := testenv.Database(t)
+	dir := t.TempDir()
+	writeRevisionManifest(t, dir, "0001", "1970-01-01T00:00:00Z", testenv.DefaultMetersYAML(t))
+	var fail, wrongTenant atomic.Bool
+	var failedReads atomic.Int32
+	ctx, cancel := context.WithCancel(context.Background())
+	svc, err := New(ctx, Config{
+		Store: store, Rules: rules.NewDirectorySource(dir), Kafka: kafka.ConnectionConfig{Brokers: testenv.Broker(t)},
+		Logger: logr.Discard(), HeartbeatTick: 100 * time.Millisecond, TopicRetentionMS: "-1", DeploymentID: "test",
+		AssignmentResolver: func(ctx context.Context, requested string) (string, attribution.Reason) {
+			if requested != tenant {
+				wrongTenant.Store(true)
+			}
+			if fail.Load() {
+				failedReads.Add(1)
+				<-ctx.Done()
+				return "", attribution.Timeout
+			}
+			return "service-connected-account", ""
+		},
+	})
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- svc.Run(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case runErr := <-done:
+			if runErr != nil && !errors.Is(runErr, context.Canceled) {
+				t.Error(runErr)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("service did not stop")
+		}
+	})
+	waitUntil(t, func() bool {
+		progress, err := store.GetTenantProgress(ctx, tenant)
+		return err == nil && progress.HeartbeatOffset > 0
+	}, "service produced no heartbeat")
+	first := testenv.ConsumeAll(t, topics.Heartbeat(tenant))
+	if len(first) == 0 {
+		t.Fatal("no sent heartbeat")
+	}
+	var event cloudevents.Event
+	if err := event.UnmarshalJSON(first[0]); err != nil {
+		t.Fatal(err)
+	}
+	data, err := heartbeat.Data(event)
+	if err != nil || data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "service-connected-account" {
+		t.Fatal("production service dropped resolver wiring")
+	}
+	if !svc.Healthy() {
+		t.Fatal("service unexpectedly unready")
+	}
+	fail.Store(true)
+	waitUntil(t, func() bool { return failedReads.Load() > 0 }, "service did not refresh attribution")
+	waitUntil(t, func() bool {
+		progress, err := store.GetTenantProgress(ctx, tenant)
+		return err == nil && progress.HeartbeatOffset > int64(len(first))
+	}, "read outage stopped usage")
+	waitUntil(t, func() bool {
+		all := testenv.ConsumeAll(t, topics.Heartbeat(tenant))
+		if string(first[0]) != string(all[0]) {
+			t.Fatal("read outage changed old heartbeat bytes")
+		}
+		for _, payload := range all[len(first):] {
+			if err := event.UnmarshalJSON(payload); err != nil {
+				t.Fatal(err)
+			}
+			data, err := heartbeat.Data(event)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if data.ExternalBillingAccountID == nil {
+				return true
+			}
+		}
+		return false
+	}, "attribution timeout did not omit the field while usage continued")
+	if !svc.Healthy() || wrongTenant.Load() {
+		t.Fatal("attribution outage affected readiness or tenant selection")
+	}
 }
 
 // deadKafka is an address nothing listens on, so connecting to it fails without a

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/fold"
 	"github.com/osac-project/osac-metering/internal/heartbeat"
@@ -1792,7 +1793,9 @@ func heartbeatDataOf(t *testing.T, row database.OutboxRow) schema.HeartbeatData 
 
 func TestRoundCarriesTheLatestExternalBillingAccountID(t *testing.T) {
 	const tenant = "billing-round"
-	p := pipelinetest.NewPipeline(t, tenant)
+	current := "connected-1"
+	resolve := func(context.Context, string) (string, attribution.Reason) { return current, "" }
+	p := pipelinetest.NewPipeline(t, tenant, round.WithAssignmentResolver(resolve))
 	created := testenv.VMEvent("e1", privatev1.EventType_EVENT_TYPE_OBJECT_CREATED,
 		base, base, "web", "RUNNING", base, "small", base)
 	created.SetExternalBillingId("acct-1")
@@ -1807,8 +1810,8 @@ func TestRoundCarriesTheLatestExternalBillingAccountID(t *testing.T) {
 	firstPayload := map[string]string{}
 	for _, row := range first {
 		data := heartbeatDataOf(t, row)
-		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "acct-1" {
-			t.Fatalf("heartbeat %s billing id = %v, want acct-1", row.ID, data.ExternalBillingAccountID)
+		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "connected-1" {
+			t.Fatal("heartbeat must use current connected assignment, not the stamped manual ID")
 		}
 		firstPayload[row.ID] = string(row.Payload)
 	}
@@ -1816,6 +1819,8 @@ func TestRoundCarriesTheLatestExternalBillingAccountID(t *testing.T) {
 	changed := testenv.VMEvent("e2", privatev1.EventType_EVENT_TYPE_OBJECT_UPDATED,
 		base.Add(time.Minute), base, "web", "RUNNING", base, "small", base)
 	changed.SetExternalBillingId("acct-2")
+	current = "connected-2"
+	p = pipelinetest.NewPipelineOnStore(t, tenant, p.Store, round.WithAssignmentResolver(resolve))
 	total += testenv.ProduceEvents(t, tenant, []*privatev1.Event{changed})
 	p.FoldAll(t, total)
 	p.RoundAt(t, base.Add(2*time.Minute))
@@ -1830,8 +1835,8 @@ func TestRoundCarriesTheLatestExternalBillingAccountID(t *testing.T) {
 		}
 		sawNew = true
 		data := heartbeatDataOf(t, row)
-		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "acct-2" {
-			t.Fatalf("new heartbeat %s billing id = %v, want acct-2", row.ID, data.ExternalBillingAccountID)
+		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "connected-2" {
+			t.Fatal("new heartbeat must reflect the new connected assignment")
 		}
 	}
 	if !sawNew {
@@ -1965,9 +1970,8 @@ func TestFoldAllWaitsForConsumerRelease(t *testing.T) {
 	pipeline.FoldAll(t, total)
 }
 
-// TestRoundCarriesBillingAccountFromLaterEventOffset checks that a later Kafka
-// offset wins when its event timestamp is earlier than a previous envelope.
-func TestRoundCarriesBillingAccountFromLaterEventOffset(t *testing.T) {
+// A retained manual fact still follows Kafka offset order, but is not new attribution.
+func TestRoundDoesNotUseManualBillingAccountFromLaterEventOffset(t *testing.T) {
 	const tenant = "billing-round-offset"
 	p := pipelinetest.NewPipeline(t, tenant)
 	laterStamp := testenv.VMEvent("e1", privatev1.EventType_EVENT_TYPE_OBJECT_CREATED,
@@ -1978,6 +1982,10 @@ func TestRoundCarriesBillingAccountFromLaterEventOffset(t *testing.T) {
 	earlierStamp.SetExternalBillingId("acct-1")
 	total := testenv.ProduceEvents(t, tenant, []*privatev1.Event{laterStamp, earlierStamp})
 	p.FoldAll(t, total)
+	manual, _, err := database.LatestFactValue(context.Background(), p.Store.Pool(), tenant, database.BillingResourceType, tenant, database.BillingField)
+	if err != nil || manual != "acct-1" {
+		t.Fatal("retained manual fact compatibility changed", err)
+	}
 	p.RoundAt(t, base.Add(2*time.Minute))
 	rows := pendingHeartbeats(t, p.Store, tenant)
 	if len(rows) == 0 {
@@ -1985,9 +1993,8 @@ func TestRoundCarriesBillingAccountFromLaterEventOffset(t *testing.T) {
 	}
 	for _, row := range rows {
 		data := heartbeatDataOf(t, row)
-		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != "acct-1" {
-			t.Fatalf("heartbeat %s billing id = %v, want acct-1 from the later offset",
-				row.ID, data.ExternalBillingAccountID)
+		if data.ExternalBillingAccountID != nil {
+			t.Fatal("manual envelope must not substitute for a connected assignment")
 		}
 	}
 }
@@ -2016,14 +2023,11 @@ func TestRoundOmitsExternalBillingAccountIDWhenTheTenantHasNone(t *testing.T) {
 	}
 }
 
-// TestRoundKeepsBillingAccountOnDeletionReversal bills a VM, then deletes it and
-// the tenant. The tenant delete event still carries the account, which is what the
-// publisher stamps from the archived tenant row. The reversal that takes back the
-// minutes billed after the VM was deleted must name that same account.
-func TestRoundKeepsBillingAccountOnDeletionReversal(t *testing.T) {
+// Newly produced reversals omit attribution after deletion even when old envelopes retain it.
+func TestRoundOmitsDeletedAssignmentOnDeletionReversal(t *testing.T) {
 	const tenant = "billing-round-reversal"
 	const account = "acct-1"
-	p := pipelinetest.NewPipeline(t, tenant)
+	p := pipelinetest.NewPipeline(t, tenant, round.WithAssignmentResolver(func(context.Context, string) (string, attribution.Reason) { return account, "" }))
 
 	created := testenv.VMEvent("e1", privatev1.EventType_EVENT_TYPE_OBJECT_CREATED,
 		base, base, "web", "RUNNING", base, "small", base)
@@ -2050,6 +2054,7 @@ func TestRoundKeepsBillingAccountOnDeletionReversal(t *testing.T) {
 		},
 	}
 	tenantDeleted.SetExternalBillingId(account)
+	p = pipelinetest.NewPipelineOnStore(t, tenant, p.Store, round.WithAssignmentResolver(func(context.Context, string) (string, attribution.Reason) { return "", attribution.NotFound }))
 	total += testenv.ProduceEvents(t, tenant, []*privatev1.Event{vmDeleted, tenantDeleted})
 	p.FoldAll(t, total)
 	p.RoundAt(t, base.Add(2*time.Minute))
@@ -2065,9 +2070,8 @@ func TestRoundKeepsBillingAccountOnDeletionReversal(t *testing.T) {
 			continue
 		}
 		reversals++
-		if data.ExternalBillingAccountID == nil || *data.ExternalBillingAccountID != account {
-			t.Fatalf("reversal heartbeat %s billing id = %v, want %s",
-				row.ID, data.ExternalBillingAccountID, account)
+		if data.ExternalBillingAccountID != nil {
+			t.Fatal("new reversal used retained tenant ID instead of missing current assignment")
 		}
 	}
 	if reversals == 0 {

@@ -32,24 +32,28 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	TenantBillingAssignments_List_FullMethodName   = "/osac.private.v1.TenantBillingAssignments/List"
-	TenantBillingAssignments_Get_FullMethodName    = "/osac.private.v1.TenantBillingAssignments/Get"
-	TenantBillingAssignments_Create_FullMethodName = "/osac.private.v1.TenantBillingAssignments/Create"
-	TenantBillingAssignments_Update_FullMethodName = "/osac.private.v1.TenantBillingAssignments/Update"
-	TenantBillingAssignments_Signal_FullMethodName = "/osac.private.v1.TenantBillingAssignments/Signal"
+	TenantBillingAssignments_GetActiveBillingAccount_FullMethodName = "/osac.private.v1.TenantBillingAssignments/GetActiveBillingAccount"
+	TenantBillingAssignments_List_FullMethodName                    = "/osac.private.v1.TenantBillingAssignments/List"
+	TenantBillingAssignments_Get_FullMethodName                     = "/osac.private.v1.TenantBillingAssignments/Get"
+	TenantBillingAssignments_Create_FullMethodName                  = "/osac.private.v1.TenantBillingAssignments/Create"
+	TenantBillingAssignments_Update_FullMethodName                  = "/osac.private.v1.TenantBillingAssignments/Update"
+	TenantBillingAssignments_Signal_FullMethodName                  = "/osac.private.v1.TenantBillingAssignments/Signal"
 )
 
 // TenantBillingAssignmentsClient is the client API for TenantBillingAssignments service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled every method fails
+// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled administrative methods fail
 // with FAILED_PRECONDITION/BILLING_NOT_CONFIGURED before any provider call. Administrator method authorization is
 // required, and assignment access is further limited to the caller's trusted tenant scope. Current platform
 // administrators have universal scope. There is no tenant self-service read path.
 // Create and Update resolve billing_account.external_billing_account_id and validate a unique provider-side match
 // before persisting. A provider write is not proof of a match: an exact read-back and uniqueness check must succeed.
 type TenantBillingAssignmentsClient interface {
+	// Reads current CONNECTED attribution for metering only. Missing, pending, closed or deleted tenants return
+	// NOT_FOUND. This read is independent of provider configuration, account state and rates, and has no HTTP binding.
+	GetActiveBillingAccount(ctx context.Context, in *TenantBillingAssignmentsGetActiveBillingAccountRequest, opts ...grpc.CallOption) (*TenantBillingAssignmentsGetActiveBillingAccountResponse, error)
 	// Lists current and historical assignments.
 	List(ctx context.Context, in *TenantBillingAssignmentsListRequest, opts ...grpc.CallOption) (*TenantBillingAssignmentsListResponse, error)
 	// Gets one assignment interval.
@@ -78,6 +82,16 @@ type tenantBillingAssignmentsClient struct {
 
 func NewTenantBillingAssignmentsClient(cc grpc.ClientConnInterface) TenantBillingAssignmentsClient {
 	return &tenantBillingAssignmentsClient{cc}
+}
+
+func (c *tenantBillingAssignmentsClient) GetActiveBillingAccount(ctx context.Context, in *TenantBillingAssignmentsGetActiveBillingAccountRequest, opts ...grpc.CallOption) (*TenantBillingAssignmentsGetActiveBillingAccountResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(TenantBillingAssignmentsGetActiveBillingAccountResponse)
+	err := c.cc.Invoke(ctx, TenantBillingAssignments_GetActiveBillingAccount_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *tenantBillingAssignmentsClient) List(ctx context.Context, in *TenantBillingAssignmentsListRequest, opts ...grpc.CallOption) (*TenantBillingAssignmentsListResponse, error) {
@@ -134,13 +148,16 @@ func (c *tenantBillingAssignmentsClient) Signal(ctx context.Context, in *TenantB
 // All implementations must embed UnimplementedTenantBillingAssignmentsServer
 // for forward compatibility.
 //
-// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled every method fails
+// Reads or changes a tenant's time-versioned billing-account assignment. With billing disabled administrative methods fail
 // with FAILED_PRECONDITION/BILLING_NOT_CONFIGURED before any provider call. Administrator method authorization is
 // required, and assignment access is further limited to the caller's trusted tenant scope. Current platform
 // administrators have universal scope. There is no tenant self-service read path.
 // Create and Update resolve billing_account.external_billing_account_id and validate a unique provider-side match
 // before persisting. A provider write is not proof of a match: an exact read-back and uniqueness check must succeed.
 type TenantBillingAssignmentsServer interface {
+	// Reads current CONNECTED attribution for metering only. Missing, pending, closed or deleted tenants return
+	// NOT_FOUND. This read is independent of provider configuration, account state and rates, and has no HTTP binding.
+	GetActiveBillingAccount(context.Context, *TenantBillingAssignmentsGetActiveBillingAccountRequest) (*TenantBillingAssignmentsGetActiveBillingAccountResponse, error)
 	// Lists current and historical assignments.
 	List(context.Context, *TenantBillingAssignmentsListRequest) (*TenantBillingAssignmentsListResponse, error)
 	// Gets one assignment interval.
@@ -171,6 +188,9 @@ type TenantBillingAssignmentsServer interface {
 // pointer dereference when methods are called.
 type UnimplementedTenantBillingAssignmentsServer struct{}
 
+func (UnimplementedTenantBillingAssignmentsServer) GetActiveBillingAccount(context.Context, *TenantBillingAssignmentsGetActiveBillingAccountRequest) (*TenantBillingAssignmentsGetActiveBillingAccountResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetActiveBillingAccount not implemented")
+}
 func (UnimplementedTenantBillingAssignmentsServer) List(context.Context, *TenantBillingAssignmentsListRequest) (*TenantBillingAssignmentsListResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method List not implemented")
 }
@@ -206,6 +226,24 @@ func RegisterTenantBillingAssignmentsServer(s grpc.ServiceRegistrar, srv TenantB
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&TenantBillingAssignments_ServiceDesc, srv)
+}
+
+func _TenantBillingAssignments_GetActiveBillingAccount_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TenantBillingAssignmentsGetActiveBillingAccountRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TenantBillingAssignmentsServer).GetActiveBillingAccount(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TenantBillingAssignments_GetActiveBillingAccount_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TenantBillingAssignmentsServer).GetActiveBillingAccount(ctx, req.(*TenantBillingAssignmentsGetActiveBillingAccountRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _TenantBillingAssignments_List_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -305,6 +343,10 @@ var TenantBillingAssignments_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "osac.private.v1.TenantBillingAssignments",
 	HandlerType: (*TenantBillingAssignmentsServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetActiveBillingAccount",
+			Handler:    _TenantBillingAssignments_GetActiveBillingAccount_Handler,
+		},
 		{
 			MethodName: "List",
 			Handler:    _TenantBillingAssignments_List_Handler,

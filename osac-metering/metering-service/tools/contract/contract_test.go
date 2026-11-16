@@ -315,6 +315,8 @@ var _ = Describe("The generated contract", func() {
 			"Schema version `v1` and later carry `external_billing_account_id`",
 		))
 		Expect(checkable).To(ContainSubstring(`"external_billing_account_id"`))
+		Expect(reference).To(ContainSubstring("current CONNECTED billing assignment"))
+		Expect(reference).To(ContainSubstring("never falls back to the manually stamped tenant value"))
 
 		var published struct {
 			Definitions map[string]struct {

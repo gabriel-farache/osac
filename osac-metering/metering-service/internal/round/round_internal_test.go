@@ -18,12 +18,46 @@ import (
 
 	"github.com/go-logr/logr"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/rules"
 	"github.com/osac-project/osac-metering/internal/testenv"
 	"github.com/osac-project/osac-metering/internal/usage"
 	privatev1 "github.com/osac-project/osac/proto/gen/osac/private/v1"
 )
+
+func TestAssignmentPreservesOpaqueIDAndOmitsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		id     string
+		reason attribution.Reason
+		want   string
+	}{
+		{"equal-text", "tenant-a", "", "tenant-a"},
+		{"empty", "", "", ""},
+		{"not-found-or-pending", "", attribution.NotFound, ""},
+		{"error-with-value", "tenant-a", attribution.Unavailable, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			r := &Round{logger: logr.Discard(), assignmentResolver: func(_ context.Context, tenant string) (string, attribution.Reason) {
+				calls++
+				if tenant != "tenant-a" {
+					t.Fatal("assignment selector changed")
+				}
+				return tc.id, tc.reason
+			}}
+			for range 2 {
+				if got := r.assignment(context.Background(), "tenant-a"); got != tc.want {
+					t.Fatalf("assignment=%q, want %q", got, tc.want)
+				}
+			}
+			if calls != 1 {
+				t.Fatal("bounded snapshot did not reuse the authoritative result")
+			}
+		})
+	}
+}
 
 // TestEventsFoldedClearsTargetOnImmediatePass checks that a round whose fold is already at
 // the watermark it just captured drops the target: the next round must capture a fresh
@@ -170,7 +204,7 @@ func TestOverflowingQuantityFailsTheRoundNamingTheResource(t *testing.T) {
 		t.Fatal(err)
 	}
 	progress := database.Progress{EventOffset: 1}
-	err = r.compare(ctx, store.Pool(), tenant, progress, base.Add(14*time.Hour), "")
+	err = r.compare(ctx, store.Pool(), tenant, progress, base.Add(14*time.Hour))
 	if err == nil {
 		ledger, ledgerErr := database.LedgerPiecesWhere(ctx, store.Pool(), tenant, "")
 		if ledgerErr != nil {

@@ -509,9 +509,18 @@ Billing methods use the existing `is_admin` authorization allow-list. Assignment
 writes are additionally constrained by the authenticated subject's trusted tenant scope;
 current platform administrators have universal tenant scope. A `cloud-provider-admin` realm
 claim alone grants no access. There is no tenant self-service assignment read, and
-`spec.tenant_id` is data, not an authorization credential. The private metering read and
-identity are owned by
-[OSAC-6888](https://redhat.atlassian.net/browse/OSAC-6888), not this administrative API.
+`spec.tenant_id` is data, not an authorization credential.
+
+`TenantBillingAssignments.GetActiveBillingAccount` is private gRPC only: its
+request contains only a validated `tenant_id` name, and its response contains only
+`external_billing_account_id`. It reads a live tenant's current CONNECTED assignment
+and the linked account's nonempty stored identifier. Missing, pending, failed,
+closed, or deleted attribution returns `NotFound`; storage faults return sanitized
+`Internal`, cancellation preserves its context status. Provider configuration,
+account state, credentials and rates are not consulted. Its exclusive metering
+identity and method-local cross-tenant scope are defined in [AUTH.md](AUTH.md).
+No administrative or tenant-role grant authorizes it. CleanAPI omits both messages
+and the method from the public API; neither API has an HTTP binding for this read.
 
 Billing list filters use normalized stored values: `this.state == "ACTIVE"` for accounts and
 `this.status.connection_state == "CONNECTED"` for assignments. The type-prefixed enum names

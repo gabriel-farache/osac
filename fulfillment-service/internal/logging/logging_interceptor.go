@@ -430,6 +430,11 @@ func (i *Interceptor) messageLogFields(ctx context.Context, logger *slog.Logger,
 func (i *Interceptor) dumpMessage(ctx context.Context, key string, value any) (field any, ok bool) {
 	switch message := value.(type) {
 	case proto.Message:
+		switch message.ProtoReflect().Descriptor().FullName() {
+		case "osac.private.v1.TenantBillingAssignmentsGetActiveBillingAccountRequest",
+			"osac.private.v1.TenantBillingAssignmentsGetActiveBillingAccountResponse":
+			return slog.String(key, redactMark), true
+		}
 		if i.redact {
 			message = redactProtoMessage(message)
 		}

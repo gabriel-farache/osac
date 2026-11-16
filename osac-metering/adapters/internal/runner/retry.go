@@ -201,7 +201,8 @@ func submitWithRetry(
 		var nonRetryable *adapters.NonRetryableError
 		if errors.As(err, &nonRetryable) {
 			retries.remove(key)
-			logger.Error(err, "non-retryable error, skipping event",
+			logger.Error(nil, "non-retryable error, skipping event",
+				"reason", "SUBMIT_NON_RETRYABLE",
 				"event_id", event.CloudEvent.ID(),
 				"attempt", attempt+1,
 			)
@@ -237,7 +238,8 @@ func submitWithRetry(
 			}
 		} else {
 			retries.remove(key)
-			logger.Error(err, "retries exhausted, skipping event",
+			logger.Error(nil, "retries exhausted, skipping event",
+				"reason", "SUBMIT_RETRIES_EXHAUSTED",
 				"event_id", event.CloudEvent.ID(),
 				"attempts", maxRetries,
 			)

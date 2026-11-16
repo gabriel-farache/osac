@@ -31,6 +31,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/go-logr/logr"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/fold"
 	kafkaconn "github.com/osac-project/osac-metering/internal/kafka"
@@ -66,12 +67,13 @@ var errRulesDisagree = errors.New("rule revisions disagree with the billing posi
 
 // Config configures the service.
 type Config struct {
-	Kafka         kafkaconn.ConnectionConfig
-	Store         *database.Store
-	Rules         rules.Source
-	HeartbeatTick time.Duration
-	DeploymentID  string
-	Logger        logr.Logger
+	AssignmentResolver attribution.Resolver
+	Kafka              kafkaconn.ConnectionConfig
+	Store              *database.Store
+	Rules              rules.Source
+	HeartbeatTick      time.Duration
+	DeploymentID       string
+	Logger             logr.Logger
 
 	// TopicRetentionMS is the retention of the topics the service creates for a tenant
 	// it serves for the first time. The retention is the recovery window, because
@@ -547,6 +549,7 @@ func (s *Service) runTenantLoops(ctx context.Context, tenant string, loops *tena
 	roundLoop, err := round.New(
 		s.cfg.Store, s.ruleset, s.client, s.consumer,
 		s.cfg.Logger.WithValues("loop", "round"), s.rulesGate,
+		round.WithAssignmentResolver(s.cfg.AssignmentResolver),
 	)
 	if err != nil {
 		s.cfg.Logger.Error(err, "creating round", "tenant", tenant)

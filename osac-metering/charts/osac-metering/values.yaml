@@ -11,6 +11,10 @@ global:
 database:
   connection: []
 
+# Optional current-assignment attribution; usage still flows if this private API is unavailable.
+fulfillment:
+  address: fulfillment-internal-api:8001
+
 # Heartbeat round interval. One minute by default; each heartbeat is a rated
 # transaction in the billing provider, so a longer interval sends fewer of
 # them and keeps running totals staler.

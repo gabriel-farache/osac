@@ -131,6 +131,23 @@ func GetActiveTenantBillingAssignmentByTenant(ctx context.Context, tx Tx, tenant
 	return row, nil
 }
 
+// GetActiveExternalBillingAccountID projects only a live tenant's current connected attribution.
+func GetActiveExternalBillingAccountID(ctx context.Context, tx Tx, tenantID string) (string, error) {
+	rows, err := tx.Query(ctx, `
+		select b.external_billing_account_id
+		from tenant_billing_assignments a
+		join billing_accounts b on b.id = a.billing_account_id
+		join tenants t on t.name = a.tenant_id
+		where a.tenant_id = $1 and a.effective_to is null and a.connection_state = 'CONNECTED'
+		  and t.deletion_timestamp = 'epoch' and t.name not in ('shared', 'system')
+		  and b.external_billing_account_id <> ''`, tenantID)
+	if err != nil {
+		return "", err
+	}
+	// Do not silently select one attribution if the active-interval invariant is broken.
+	return pgx.CollectExactlyOneRow(rows, pgx.RowTo[string])
+}
+
 // GetActiveTenantBillingAssignmentByAccount returns accountID's current (effective_to is null) assignment, or a
 // pgx.ErrNoRows-wrapping error when it has none.
 func GetActiveTenantBillingAssignmentByAccount(ctx context.Context, tx Tx, accountID string) (

@@ -91,6 +91,9 @@ mcp:
 # Authentication and authorization configuration:
 auth:
 
+  # Name of the existing producer SA in this release namespace. Empty disables its private read.
+  meteringServiceAccount: ""
+
   # This defines the URL of the OAuth issuer used for authentication. This parameter is mandatory.
   issuerUrl:
 

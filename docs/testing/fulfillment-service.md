@@ -88,6 +88,7 @@ identity E2E is [OSAC-6614](https://redhat.atlassian.net/browse/OSAC-6614).
   serially restart and restore the grpc-server. Secret mounts are patched by
   the fixture, not rendered by the installer, so this does not verify chart
   wiring. Real-provider and cross-component E2E are outside this boundary.
+- The private metering read ([OSAC-6888](https://redhat.atlassian.net/browse/OSAC-6888)) adds local TLS/signed-JWT/JWKS/OPA-to-PostgreSQL coverage and an installed pod-bound TokenRequest spec; only a deployed producer run can establish actual projected-file consumption end to end.
 - Catalog pricing inventory, rate resolution, and provider rate cards
   ([OSAC-6873](https://redhat.atlassian.net/browse/OSAC-6873),
   [OSAC-6889](https://redhat.atlassian.net/browse/OSAC-6889),

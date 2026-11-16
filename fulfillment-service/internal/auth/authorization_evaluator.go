@@ -29,6 +29,9 @@ var authzPolicy string
 // EvaluatorBuilder contains the data and logic needed to build an evaluator that checks authorization
 // using an embedded Rego policy evaluated with the OPA library. Don't create instances of this type directly, use the
 type EvaluatorBuilder struct {
+	meteringIssuer           string
+	meteringSubject          string
+	meteringAudience         string
 	emergencyServiceAccounts []string
 	serviceAccountResolver   ManagedServiceAccountResolver
 	tenantResolver           TenantResolver
@@ -59,6 +62,9 @@ type AuthzDecision struct {
 // This structure preserves all claims needed for OPA policy evaluation, ensuring
 // identical authorization decisions for both actual operations and permission checks.
 type AuthContext struct {
+	validatedIssuer    string
+	validatedSubject   string
+	validatedAudiences []string
 	// AuthMethod indicates the authentication method: "jwt" or "serviceaccount"
 	AuthMethod string
 
@@ -162,6 +168,13 @@ func NewEvaluator() *EvaluatorBuilder {
 	return &EvaluatorBuilder{}
 }
 
+// SetMeteringIdentity binds the private attribution read to one Kubernetes identity.
+// An empty binding disables the read. The issuer must come from receiver configuration.
+func (b *EvaluatorBuilder) SetMeteringIdentity(issuer, subject, audience string) *EvaluatorBuilder {
+	b.meteringIssuer, b.meteringSubject, b.meteringAudience = issuer, subject, audience
+	return b
+}
+
 func (b *EvaluatorBuilder) AddEmergencyServiceAccounts(value []string) *EvaluatorBuilder {
 	b.emergencyServiceAccounts = value
 	return b
@@ -181,6 +194,13 @@ func (b *EvaluatorBuilder) SetTenantResolver(value TenantResolver) *EvaluatorBui
 
 // Build creates an OPAAuthorizationEvaluator with the embedded authz.rego policy.
 func (b *EvaluatorBuilder) Build() (*OPAAuthorizationEvaluator, error) {
+	if b.meteringSubject != "" {
+		parts := strings.Split(b.meteringSubject, ":")
+		if len(parts) != 4 || parts[0] != "system" || parts[1] != "serviceaccount" ||
+			len(validation.IsDNS1123Label(parts[2])) != 0 || len(validation.IsDNS1123Subdomain(parts[3])) != 0 {
+			return nil, errors.New("metering identity must be a full Kubernetes service-account subject")
+		}
+	}
 	emergencyServiceAccounts, err := buildEmergencyServiceAccounts(b.emergencyServiceAccounts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build emergency service accounts: %w", err)
@@ -188,6 +208,9 @@ func (b *EvaluatorBuilder) Build() (*OPAAuthorizationEvaluator, error) {
 
 	policyData := inmem.NewFromObject(map[string]any{
 		"emergency_service_accounts": emergencyServiceAccounts,
+		"metering_issuer":            b.meteringIssuer,
+		"metering_subject":           b.meteringSubject,
+		"metering_audience":          b.meteringAudience,
 	})
 
 	query, err := rego.New(
@@ -268,7 +291,8 @@ func (e *OPAAuthorizationEvaluator) Evaluate(
 		return nil, errors.New("method is mandatory")
 	}
 	if authContext.ManagedServiceAccountCandidate &&
-		(method == "/osac.public.v1.Events/Watch" || method == "/osac.public.v1.ConsoleSessions/Create") {
+		(method == "/osac.public.v1.Events/Watch" || method == "/osac.public.v1.ConsoleSessions/Create" ||
+			method == "/osac.private.v1.TenantBillingAssignments/GetActiveBillingAccount") {
 		return &AuthzDecision{Allowed: false}, nil
 	}
 
@@ -366,7 +390,10 @@ func (e *OPAAuthorizationEvaluator) Evaluate(
 func constructOPAInput(authContext *AuthContext, method string) map[string]any {
 	// Build the identity document, matching the structure from GrpcAuthzInterceptor.buildInput
 	identity := map[string]any{
-		"authnMethod": authContext.AuthMethod,
+		"authnMethod":         authContext.AuthMethod,
+		"validated_issuer":    authContext.validatedIssuer,
+		"validated_subject":   authContext.validatedSubject,
+		"validated_audiences": authContext.validatedAudiences,
 	}
 
 	if authContext.AuthMethod == "serviceaccount" {

@@ -30,6 +30,16 @@ up; it never replaces one, and it drops heartbeat IDs it has already seen.
 That is what makes a crash between a Kafka send and the outbox delete safe: the
 same rows are resent with the same IDs.
 
+New heartbeat bodies optionally populate the existing `external_billing_account_id`
+from the current CONNECTED Fulfillment billing assignment, never from the manual
+TenantSpec/Event value retained in folded history. A private TLS lookup uses the
+existing producer ServiceAccount's dedicated projected token; failure or absent
+configuration omits attribution and never stops usage/readiness. The lookup has
+a 500 ms deadline and a maximum one-second per-tenant snapshot. No provider/rate
+lookup is involved. Already persisted outbox and emitted/replayed bytes are
+immutable; newly computed bodies (including corrections) use current attribution.
+The v1 event shape, M360 field exclusion and usage/deduplication keys are unchanged.
+
 Everything is rebuildable: history from the event topics, the ledger from the
 heartbeat topic, revisions from the ConfigMaps. Losing or restoring the
 database never bills usage twice. It also loses nothing as long as the topics

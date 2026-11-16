@@ -323,8 +323,8 @@ The controller's service account (`service-account-osac-controller`) is listed a
 account in the authorization policy, granting it full access to all API methods.
 
 > **Note**: The fulfillment service no longer uses Kubernetes service accounts (`controller` or
-> `client`) for internal authentication. All service-to-service communication now uses OAuth client
-> credentials.
+> `client`) for controller authentication. Controllers use OAuth client credentials.
+> The metering-only attribution read uses the narrow Kubernetes-token exception below.
 
 ### 5. Configure Identity Provider (IDP) Management
 
@@ -662,6 +662,29 @@ served by a closed, reviewed allow-list: `BillingAccounts/List`,
 `Update`, on both the public and private APIs. The private
 `TenantBillingAssignments/Signal` method is admin-only. Any other billing method is
 denied for every subject, and no tenant role or other realm role grants billing access.
+The private `TenantBillingAssignments.GetActiveBillingAccount` is a separate,
+metering-only read, never an admin or RoleBinding grant. It requires the validated
+issuer to equal the Kubernetes issuer loaded from the **receiver's own mounted
+pod token** when configuring JWKS, the full signed `sub` to equal
+`system:serviceaccount:<release-namespace>:<existing-producer-SA>`, and signed
+`aud` to contain `osac-metering-attribution`. The chart supplies that exact SA
+through `--metering-service-account`; an absent binding/receiver Kubernetes issuer
+disables this read. Incoming claim values never configure issuer trust.
+The existing signature, expiry and JWKS checks still run. No username, role,
+unsigned header, ordinary administrator or emergency administrator bypasses this
+method's binding. Only this method grants cross-tenant machine read scope;
+other methods keep their previous scope and permissions.
+
+The producer alone mounts a 600-second, rotating projected token with that
+audience and rereads the token file for each RPC over verified TLS. Adapter
+default-audience tokens cannot use the read; their existing SA permissions and
+emergency grants are unchanged. The chart grants neither TokenRequest nor pod
+writes to that SA. Operators must assess additional grants: a principal able to
+mint that SA's dedicated-audience tokens or modify its pods can act as metering.
+Validation is offline: pod/SA deletion does not revoke an already-issued JWT
+before expiry (plus the existing five-second server leeway). No TokenReview or
+new revocation framework is introduced. This read never loads provider credentials.
+
 No `cloud-provider-admin` realm role is provisioned; a token that claims it grants
 nothing. `tenant_id` on an assignment is data, not an authorization credential, and
 there is no tenant self-service assignment read.

@@ -130,6 +130,37 @@ func (b *PrivateTenantBillingAssignmentsServerBuilder) Build() (
 	return
 }
 
+// GetActiveBillingAccount reads attribution without consulting billing-provider availability.
+func (s *PrivateTenantBillingAssignmentsServer) GetActiveBillingAccount(ctx context.Context,
+	request *privatev1.TenantBillingAssignmentsGetActiveBillingAccountRequest,
+) (response *privatev1.TenantBillingAssignmentsGetActiveBillingAccountResponse, err error) {
+	if err = s.validator.Validate(request); err != nil {
+		return nil, status.Error(codes.InvalidArgument, "invalid tenant selector")
+	}
+	if !auth.SubjectFromContext(ctx).Tenants.Contains(request.GetTenantId()) {
+		return nil, status.Error(codes.PermissionDenied, "permission denied")
+	}
+	tx, err := database.TxFromContext(ctx)
+	if err != nil {
+		return nil, status.Error(codes.Internal, "billing attribution unavailable")
+	}
+	defer tx.ReportError(&err)
+	id, err := database.GetActiveExternalBillingAccountID(ctx, tx, request.GetTenantId())
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, status.FromContextError(ctx.Err()).Err()
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, status.Error(codes.NotFound, "connected billing attribution not found")
+		}
+		s.logger.ErrorContext(ctx, "Billing attribution read failed", slog.String("reason", "BILLING_ATTRIBUTION_STORAGE"))
+		return nil, status.Error(codes.Internal, "billing attribution unavailable")
+	}
+	return privatev1.TenantBillingAssignmentsGetActiveBillingAccountResponse_builder{
+		ExternalBillingAccountId: id,
+	}.Build(), nil
+}
+
 // List intersects the request filter with the trusted subject's tenant scope before counting and pagination.
 // Only is_admin callers reach this method; tenant membership does not grant billing method access.
 func (s *PrivateTenantBillingAssignmentsServer) List(ctx context.Context,

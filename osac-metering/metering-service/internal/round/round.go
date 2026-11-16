@@ -24,6 +24,7 @@ import (
 	"github.com/IBM/sarama"
 	"github.com/go-logr/logr"
 
+	"github.com/osac-project/osac-metering/internal/attribution"
 	"github.com/osac-project/osac-metering/internal/database"
 	"github.com/osac-project/osac-metering/internal/heartbeat"
 	"github.com/osac-project/osac-metering/internal/metrics"
@@ -76,11 +77,15 @@ type Calculator interface {
 
 // Round runs a tenant's heartbeat rounds.
 type Round struct {
-	store      *database.Store
-	calculator Calculator
-	client     sarama.Client
-	consumer   sarama.Consumer
-	logger     logr.Logger
+	assignmentResolver attribution.Resolver
+	assignmentTenant   string
+	assignmentAt       time.Time
+	assignmentID       string
+	store              *database.Store
+	calculator         Calculator
+	client             sarama.Client
+	consumer           sarama.Consumer
+	logger             logr.Logger
 
 	// rulesGate is held for its read side by every tick, so a rule-revision change
 	// (which holds the write side) can neither swap the calculator between one
@@ -111,11 +116,48 @@ func New(
 	consumer sarama.Consumer,
 	logger logr.Logger,
 	rulesGate *sync.RWMutex,
+	options ...Option,
 ) (*Round, error) {
-	return &Round{
+	r := &Round{
 		store: store, calculator: calculator, client: client, consumer: consumer, logger: logger,
 		rulesGate: rulesGate, eventTarget: map[string]int64{}, catchUpBatch: CatchUpBatch,
-	}, nil
+	}
+	for _, option := range options {
+		option(r)
+	}
+	return r, nil
+}
+
+type Option func(*Round)
+
+func WithAssignmentResolver(resolve attribution.Resolver) Option {
+	return func(r *Round) { r.assignmentResolver = resolve }
+}
+
+// One small snapshot per tenant loop avoids one timeout for every meter. Age starts
+// before I/O, so a slow read cannot extend the maximum one-second staleness.
+func (r *Round) assignment(ctx context.Context, tenant string) string {
+	if tenant == r.assignmentTenant && time.Since(r.assignmentAt) < time.Second {
+		return r.assignmentID
+	}
+	r.assignmentTenant, r.assignmentAt, r.assignmentID = tenant, time.Now(), ""
+	reason := attribution.NotConfigured
+	if r.assignmentResolver != nil {
+		lookup, cancel := context.WithTimeout(ctx, attribution.Budget)
+		id, why := r.assignmentResolver(lookup, tenant)
+		if lookup.Err() != nil {
+			id, why = "", attribution.Timeout
+		}
+		cancel()
+		reason = why
+		if reason == "" && id != "" && time.Since(r.assignmentAt) < time.Second {
+			r.assignmentID = id
+		}
+	}
+	if reason != "" {
+		r.logger.Info("billing attribution omitted", "reason", string(reason))
+	}
+	return r.assignmentID
 }
 
 // SetCatchUpBatch shrinks the catch-up bound. For tests only.
@@ -231,13 +273,7 @@ func (r *Round) Once(ctx context.Context, tenant string, roundTime time.Time) er
 		return nil
 	}
 
-	billingID, _, err := database.LatestFactValue(
-		ctx, tx, tenant, database.BillingResourceType, tenant, database.BillingField,
-	)
-	if err != nil {
-		return err
-	}
-	if err := r.compare(ctx, tx, tenant, progress, roundTime, billingID); err != nil {
+	if err := r.compare(ctx, tx, tenant, progress, roundTime); err != nil {
 		return err
 	}
 	if err := database.SetLastRound(ctx, tx, tenant, roundTime, progress.EventOffset); err != nil {
@@ -346,7 +382,6 @@ func (r *Round) compare(
 	tenant string,
 	progress database.Progress,
 	roundTime time.Time,
-	externalBillingAccountID string,
 ) error {
 	full, tail, err := r.scanResources(ctx, tx, tenant, progress, roundTime)
 	if err != nil {
@@ -359,7 +394,6 @@ func (r *Round) compare(
 		}
 		if err := r.recomputeWhole(
 			ctx, tx, tenant, progress, roundTime, resource, facts, root, ledger,
-			externalBillingAccountID,
 		); err != nil {
 			return err
 		}
@@ -385,7 +419,6 @@ func (r *Round) compare(
 			// unjustified usage is reversed.
 			if err := r.recomputeWhole(
 				ctx, tx, tenant, progress, roundTime, resource, facts, root, ledger,
-				externalBillingAccountID,
 			); err != nil {
 				return err
 			}
@@ -395,7 +428,6 @@ func (r *Round) compare(
 		// facts holds exactly what the previous round wrote.
 		if err := r.diffAndCommit(
 			ctx, tx, tenant, progress, roundTime, pieces, ledger, false, *progress.LastRoundTime,
-			externalBillingAccountID,
 		); err != nil {
 			return err
 		}
@@ -433,7 +465,6 @@ func (r *Round) recomputeWhole(
 	ctx context.Context, tx database.Querier, tenant string,
 	progress database.Progress, roundTime time.Time,
 	res resource, facts []database.Fact, root *usage.Root, ledger []database.LedgerPiece,
-	externalBillingAccountID string,
 ) error {
 	pieces, err := r.calculator.Expected(
 		tenant, res.resourceType, res.resourceID, facts, root, roundTime,
@@ -444,7 +475,6 @@ func (r *Round) recomputeWhole(
 	// Every key with a ledger row takes part: a late event can remove a meter entirely.
 	return r.diffAndCommit(
 		ctx, tx, tenant, progress, roundTime, pieces, ledger, true, time.Time{},
-		externalBillingAccountID,
 	)
 }
 
@@ -622,7 +652,6 @@ func (r *Round) diffAndCommit(
 	ledger []database.LedgerPiece,
 	includeLedgerKeys bool,
 	tailFrom time.Time,
-	externalBillingAccountID string,
 ) error {
 	keys := map[database.LedgerKey]bool{}
 	for _, piece := range expected {
@@ -679,7 +708,7 @@ func (r *Round) diffAndCommit(
 			event, err := heartbeat.New(
 				tenant, key, difference.start, difference.end, difference.quantityMicro,
 				meter.Unit, roundTime, progress.EventOffset, revision,
-				externalBillingAccountID,
+				r.assignment(ctx, tenant),
 			)
 			if err != nil {
 				return err

@@ -23,6 +23,13 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       volumes:
+        - name: attribution-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: osac-metering-attribution
+                  expirationSeconds: 600
+                  path: token
         - name: kafka-secrets
           emptyDir:
             medium: Memory
@@ -65,6 +72,12 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
+            - name: FULFILLMENT_ADDRESS
+              value: {{ .Values.fulfillment.address | quote }}
+            - name: FULFILLMENT_CA_FILE
+              value: /etc/ca-bundle/bundle.pem
+            - name: FULFILLMENT_TOKEN_FILE
+              value: /etc/metering/attribution/token
             - name: METERING_DEPLOYMENT_ID
               value: {{ include "osac-metering.osacDeploymentId" . | quote }}
             - name: DB_URL_FILE
@@ -82,6 +95,9 @@ spec:
             - name: KAFKA_SASL_PASSWORD_FILE
               value: /etc/kafka-secrets/password
           volumeMounts:
+            - name: attribution-token
+              mountPath: /etc/metering/attribution
+              readOnly: true
             - name: kafka-secrets
               mountPath: /etc/kafka-secrets
               readOnly: true
